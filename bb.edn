@@ -1,0 +1,31 @@
+{:paths ["."],
+ :deps #:cheshire{cheshire #:mvn{:version "5.13.0"}},
+ :tasks
+ {serve
+  {:doc
+   "Start the ART19 MCP server (ART19_MCP_PORT env or OS-assigned)",
+   :task (shell "bb art19_mcp.bb")},
+  run {:doc "Alias for serve", :task (run 'serve)},
+  start
+  {:doc "Start on port 3007 (or ART19_MCP_PORT) for local dev",
+   :task
+   (shell
+    {:env
+     (merge
+      (into {} (System/getenv))
+      {"ART19_MCP_PORT" (or (System/getenv "ART19_MCP_PORT") "3007")})}
+    "bb art19_mcp.bb")},
+  test
+  {:doc "Run integration tests (fake API, no real credentials)",
+   :task (shell "bb tests/test_art19_mcp.clj")},
+  lint
+  {:doc "Lint with clj-kondo",
+   :task (shell "clj-kondo --lint art19_mcp.bb")},
+  health
+  {:doc "Health check against running server (set ART19_MCP_PORT)",
+   :task
+   (shell
+    (str
+     "curl -sf http://127.0.0.1:"
+     (or (System/getenv "ART19_MCP_PORT") "3007")
+     "/health | jq ."))}}}
