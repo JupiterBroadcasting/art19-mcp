@@ -68,10 +68,10 @@ export ART19_API_CREDENTIAL="your-credential"
 
 ## NixOS Deployment
 
-This is managed as a NixOS service in the J.O.E. flake:
+This is managed as a NixOS service.
 
 ```nix
-# In hosts/joe/default.nix
+# In hosts/<hostname>/default.nix
 services.art19-mcp = {
   enable = true;
   port = 3007;

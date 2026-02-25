@@ -67,10 +67,10 @@ export ART19_API_CREDENTIAL="your-credential"
 
 ## NixOS Deployment
 
-This is managed as a NixOS service in the [JupiterBroadcasting/joe](https://github.com/JupiterBroadcasting/joe) flake:
+This is managed as a NixOS service exposed by the flake module.
 
 ```nix
-# In hosts/joe/default.nix
+# In hosts/<hostname>/default.nix
 services.art19-mcp = {
   enable = true;
   port = 3007;
@@ -278,7 +278,7 @@ Tests use a fake API server that mimics ART19's responses. Tests call the real s
 
 ## Philosophy
 
-Follow the same grumpy pragmatism as the rest of J.O.E.:
+Follow grumpy pragmatism:
 
 - **Actions, Calculations, Data** — tool functions are actions, keep them thin; pure extraction/formatting logic lives in `-row` helpers or inline maps
 - **One file is fine** — don't split into namespaces until you genuinely need to
