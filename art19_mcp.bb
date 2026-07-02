@@ -178,7 +178,7 @@
         params (cond-> {}
                  (:id sid-result) (assoc "series_id" (:id sid-result))
                  season_id (assoc "season_id" season_id)
-                 (some? published) (assoc "published" (str published))
+                 (some? published) (assoc "published" published)
                  q (assoc "q" q)
                  sort (assoc "sort" sort)
                  year (assoc "year" (str year))
@@ -328,8 +328,7 @@
 (defn tool-list-credits [{:keys [episode_id]} config]
   (let [resp (fetch-all-pages "/credits"
                               {"creditable_id" episode_id
-                               "creditable_type" "Episode"
-                               "include" "person"}
+                               "creditable_type" "Episode"}
                               config)]
     (if (:error resp)
       resp
@@ -384,10 +383,19 @@
       resp
       (:data resp))))
 
-(defn tool-create-person [{:keys [first_name last_name email bio]} config]
+(defn tool-create-person [{:keys [first_name last_name email bio
+                                    born died from_country from_locality from_region
+                                    private_email]}
+                           config]
   (let [attrs (cond-> {:first_name first_name :last_name last_name}
                 email (assoc :public_email email)
-                bio (assoc :biography bio))
+                bio (assoc :biography bio)
+                born (assoc :born born)
+                died (assoc :died died)
+                from_country (assoc :from_country from_country)
+                from_locality (assoc :from_locality from_locality)
+                from_region (assoc :from_region from_region)
+                (some? private_email) (assoc :private_email private_email))
         body {:data {:type "people" :attributes attrs}}
         resp (api-post "/people" body config)]
     (if (:error resp)
@@ -494,9 +502,9 @@
 ;; MEDIA ASSETS (audio file details: duration, file_size, cdn_url)
 
 (defn tool-list-media-assets [{:keys [attachment_id attachment_type]} config]
-  (when (str/blank? attachment_id) (throw (ex-info "attachment_id is required" {:type :bad-request})))
-  (when (str/blank? attachment_type) (throw (ex-info "attachment_type is required" {:type :bad-request})))
-  (let [params {"attachment_id" attachment_id "attachment_type" attachment_type}
+  (let [params (cond-> {}
+                 attachment_id (assoc "attachment_id" attachment_id)
+                 attachment_type (assoc "attachment_type" attachment_type))
         resp (api-get "/media_assets" params config)]
     (if (:error resp)
       resp
@@ -556,16 +564,14 @@
       resp
       (:data resp))))
 
-(defn tool-update-marker-point [{:keys [marker_point_id position_type start_position type
-                                        maximum_content_duration maximum_content_count default_for]}
+(defn tool-update-marker-point [{:keys [marker_point_id position_type start_position
+                                        maximum_content_duration maximum_content_count]}
                                 config]
   (let [attrs (cond-> {}
                 position_type (assoc :position_type position_type)
                 (some? start_position) (assoc :start_position start_position)
-                type (assoc :type type)
                 maximum_content_duration (assoc :maximum_content_duration maximum_content_duration)
-                maximum_content_count (assoc :maximum_content_count maximum_content_count)
-                (some? default_for) (assoc :default_for default_for))
+                maximum_content_count (assoc :maximum_content_count maximum_content_count))
         body {:data {:type "marker_points" :id marker_point_id :attributes attrs}}
         resp (api-patch (str "/marker_points/" marker_point_id) body config)]
     (if (:error resp)
@@ -718,7 +724,7 @@
                  feed_id (assoc "feed_id" feed_id)
                  series_id (assoc "series_id" series_id)
                  itunes_type (assoc "itunes_type" itunes_type)
-                 (some? published) (assoc "published" (str published))
+                 (some? published) (assoc "published" published)
                  q (assoc "q" q)
                  released_after (assoc "released_after" released_after)
                  released_before (assoc "released_before" released_before)
@@ -799,8 +805,8 @@
                                :published {:type "boolean" :description "Filter to published (true) or unpublished (false) episodes"}
                                :q {:type "string" :description "Search episodes by title"}
                                :sort {:type "string" :description "How to sort results (default: sort_title). Valid values: sort_title, title, released_at, earliest_released_at, released_or_created_at, created_at, updated_at. Can be comma-separated for multiple sorts. Prefix with - for descending, e.g. -released_at."}
-                               :year {:type "integer" :description "Filter by release year"}
-                               :month {:type "integer" :description "Filter by release month (1-12)"}
+                               :year {:type "string" :description "Filter by release year (e.g., '2026')"}
+                               :month {:type "string" :description "Filter by release month (e.g., '1' through '12')"}
                                :released_after {:type "string" :description "ISO 8601 timestamp — only episodes released after this"}
                                :released_before {:type "string" :description "ISO 8601 timestamp — only episodes released before this"}
                                :page {:type "integer" :description "Page number (default: 1)"}
@@ -827,11 +833,7 @@
                                :premium_status {:type "string" :description "Premium status: active, inactive, force-active, force-inactive"}
                                :released_at {:type "string" :description "ISO 8601 release datetime"}
                                :release_end_at {:type "string" :description "ISO 8601 datetime when the episode will be removed from the feed. The episode stays published but becomes inaccessible after this time."}
-                               :release_immediately {:type "boolean" :description "Release immediately upon publishing"}
-                               :cover_image_id {:type "string" :description "Cover image UUID"}
-                               :allow_user_comments {:type "boolean" :description "Allow user comments"}
-                               :rss_guid {:type "string" :description "RSS GUID (globally unique identifier, auto-generated if not provided)"}
-                               :status {:type "string" :description "Episode status: active, inactive (deprecated - use published instead)"}}
+                               :release_immediately {:type "boolean" :description "Release immediately upon publishing"}}
                   :required ["title"]}}
 
    {:name "update_episode"
@@ -848,10 +850,7 @@
                                :itunes_type {:type "string" :description "Episode type: full, trailer, bonus"}
                                :premium_status {:type "string" :description "Premium status: active, inactive, force-active, force-inactive"}
                                :cover_image_id {:type "string" :description "Cover image UUID"}
-                               :allow_user_comments {:type "boolean" :description "Allow user comments"}
-                               :rss_guid {:type "string" :description "RSS GUID (globally unique identifier)"}
-                               :season_id {:type "string" :description "Season UUID to assign episode to"}
-                               :status {:type "string" :description "Episode status: active, inactive (deprecated - use published instead)"}}
+                               :allow_user_comments {:type "boolean" :description "Allow user comments"}}
                   :required ["episode_id"]}}
 
    {:name "delete_episode"
@@ -869,9 +868,7 @@
    {:name "list_series"
     :description "List all podcast series/shows available in the ART19 account."
     :inputSchema {:type "object"
-                  :properties {:q {:type "string" :description "Filter series by title (case-insensitive)."}
-                               :page {:type "integer" :description "Page number"}
-                               :page_size {:type "integer" :description "Results per page (max 100)"}}
+                  :properties {:q {:type "string" :description "Filter series by title (case-insensitive)."}}
                   :required []}}
 
    {:name "get_series"
@@ -887,10 +884,7 @@
     :inputSchema {:type "object"
                   :properties {:series_slug {:type "string" :description "Series slug or JB alias"}
                                :series_id {:type "string" :description "Series UUID"}
-                               :q {:type "string" :description "Filter seasons by title (case-insensitive search)."}
-                               :page {:type "integer" :description "Page number"}
-                               :page_size {:type "integer" :description "Results per page (max 100)"}
-                               :sort {:type "string" :description "Sort order: created_at, number, updated_at"}}
+                               :q {:type "string" :description "Filter seasons by title (case-insensitive search)."}}
                   :required []}}
 
    {:name "get_season"
@@ -937,17 +931,21 @@
     :inputSchema {:type "object"
                   :properties {:first_name {:type "string"}
                                :last_name {:type "string"}
-                               :email {:type "string"}
-                               :bio {:type "string"}}
+                               :email {:type "string" :description "Public email address"}
+                               :bio {:type "string" :description "Biography text"}
+                               :born {:type "string" :description "Date of birth (ISO 8601)"}
+                               :died {:type "string" :description "Date of death (ISO 8601)"}
+                               :from_country {:type "string" :description "Country of origin"}
+                               :from_locality {:type "string" :description "City of origin"}
+                               :from_region {:type "string" :description "Region/state of origin"}
+                               :private_email {:type "string" :description "Private email (not published)"}}
                   :required ["first_name" "last_name"]}}
 
    {:name "list_episode_versions"
     :description "List audio versions for an episode. Each version corresponds to an audio file."
     :inputSchema {:type "object"
                   :properties {:episode_id {:type "string" :description "Filter by episode UUID"}
-                               :feed_item_id {:type "string" :description "Filter by feed item UUID"}
-                               :page {:type "integer" :description "Page number"}
-                               :page_size {:type "integer" :description "Results per page (max 100)"}}
+                               :feed_item_id {:type "string" :description "Filter by feed item UUID"}}
                   :required []}}
 
    {:name "create_episode_version"
@@ -1009,7 +1007,7 @@
     :inputSchema {:type "object"
                   :properties {:attachment_id {:type "string" :description "Episode version UUID to get media assets for"}
                                :attachment_type {:type "string" :description "Type: EpisodeVersion (works but not documented)"}}
-                  :required ["attachment_id" "attachment_type"]}}
+                  :required []}}
 
    {:name "list_marker_points"
     :description "List chapter/ad insertion marker points for an episode version. Returns id, position_type_name (preroll/midroll/postroll), start_position, type."
@@ -1043,15 +1041,13 @@
     :inputSchema {:type "object" :properties {:marker_point_id {:type "string" :description "Marker point UUID"}} :required ["marker_point_id"]}}
 
    {:name "update_marker_point"
-    :description "Update a marker point's timing, ad limits, or type."
+    :description "Update a marker point's timing or ad limits."
     :inputSchema {:type "object"
                   :properties {:marker_point_id {:type "string" :description "Marker point UUID"}
                                :position_type {:type "integer" :description "0=preroll, 1=midroll, 2=postroll"}
                                :start_position {:type "number" :description "Position in seconds"}
-                               :type {:type "string" :description "Marker type: AdInsertionPoint or EmbeddedAdPoint"}
                                :maximum_content_duration {:type "number" :description "Max total ad time in seconds"}
-                               :maximum_content_count {:type "integer" :description "Max number of ads at this marker"}
-                               :default_for {:type "string" :description "CMS template marker (e.g., 'warpfeed') or null"}}
+                               :maximum_content_count {:type "integer" :description "Max number of ads at this marker"}}
                   :required ["marker_point_id"]}}
 
    {:name "list_marker_point_content_rules"
@@ -1143,13 +1139,8 @@
                                :feed_id {:type "string" :description "Feed UUID (alternative to series_id)"}
                                :title {:type "string" :description "Feed item title"}
                                :description {:type "string" :description "Description (HTML supported if description_is_html is true)"}
-                               :description_is_html {:type "boolean" :description "Set to true if description contains HTML"}
                                :itunes_type {:type "string" :description "Type: full, bonus, trailer"}
                                :released_at {:type "string" :description "ISO 8601 release datetime"}
-                               :release_end_at {:type "string" :description "ISO 8601 datetime when the episode will be removed from the feed"}
-                               :published {:type "boolean" :description "Set to true to publish immediately upon release time"}
-                               :inherit_release_status {:type "boolean" :description "Inherit release status from the episode (only for feed items not tied to episodes)"}
-                               :rss_guid {:type "string" :description "RSS GUID (auto-generated if not provided)"}
                                :premium_status {:type "string" :description "Premium status: active, inactive"}}
                   :required ["title"]}}
 
@@ -1159,13 +1150,9 @@
                   :properties {:feed_item_id {:type "string" :description "Feed item UUID"}
                                :title {:type "string" :description "Feed item title"}
                                :description {:type "string" :description "Description (HTML supported if description_is_html is true)"}
-                               :description_is_html {:type "boolean" :description "Set to true if description contains HTML"}
                                :itunes_type {:type "string" :description "Type: full, bonus, trailer"}
                                :published {:type "boolean" :description "Set to true to publish, false to unpublish"}
                                :released_at {:type "string" :description "ISO 8601 release datetime"}
-                               :release_end_at {:type "string" :description "ISO 8601 datetime when the episode will be removed from the feed"}
-                               :inherit_release_status {:type "boolean" :description "Inherit release status from the episode"}
-                               :rss_guid {:type "string" :description "RSS GUID"}
                                :premium_status {:type "string" :description "Premium status: active, inactive"}}
                   :required ["feed_item_id"]}}
 
