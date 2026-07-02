@@ -123,6 +123,13 @@
 (defn api-delete [path config]
   (api-request! :delete path {} nil config))
 
+;; Helper: unwrap API response or return error as-is.
+;; Eliminates the repeated (if (:error resp) resp (:data resp)) pattern.
+(defn or-error
+  "If resp is an error, return it. Otherwise apply f to resp and return the result."
+  [resp f]
+  (if (:error resp) resp (f resp)))
+
 (defn fetch-all-pages [path query-params config & {:keys [max-pages] :or {max-pages 20}}]
   (loop [page 1 acc []]
     (let [params (merge query-params
@@ -166,8 +173,8 @@
 ;; EPISODES
 
 (defn tool-list-episodes [{:keys [ids series_id series_slug season_id published q
-                                   sort year month released_after released_before
-                                   itunes_type page page_size]}
+                                  sort year month released_after released_before
+                                  itunes_type page page_size]}
                           config]
   (let [sid-result (if series_slug
                      (resolve-series-id series_slug config)
@@ -207,9 +214,7 @@
 (defn tool-get-episode [{:keys [episode_id include]} config]
   (let [params (if include {"include" include} {})
         resp (api-get (str "/episodes/" episode_id) params config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-create-episode [{:keys [series_id series_slug title description description_is_html
                                    season_id itunes_type premium_status
@@ -233,9 +238,7 @@
                season_id (assoc :season {:data {:type "seasons" :id season_id}}))
         body {:data {:type "episodes" :attributes attrs :relationships rels}}
         resp (api-post "/episodes" body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-update-episode [{:keys [episode_id title description description_is_html
                                    published released_at release_end_at release_immediately
@@ -256,15 +259,11 @@
                 (some? allow_user_comments) (assoc :allow_user_comments allow_user_comments))
         body {:data {:type "episodes" :id episode_id :attributes attrs}}
         resp (api-patch (str "/episodes/" episode_id) body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-delete-episode [{:keys [episode_id]} config]
   (let [resp (api-delete (str "/episodes/" episode_id) config)]
-    (if (:error resp)
-      resp
-      {:deleted episode_id})))
+    (or-error resp (constantly {:deleted episode_id}))))
 
 (defn tool-publish-episode [{:keys [episode_id released_at release_immediately]} config]
   (let [attrs (cond-> {:published true}
@@ -272,9 +271,7 @@
                 (some? release_immediately) (assoc :release_immediately release_immediately))
         body {:data {:type "episodes" :id episode_id :attributes attrs}}
         resp (api-patch (str "/episodes/" episode_id) body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 ;; SERIES
 
@@ -300,9 +297,7 @@
         _ (when (:error sid-result) (throw (ex-info (:error sid-result) {})))
         params (if include {"include" include} {})
         resp (api-get (str "/series/" (:id sid-result)) params config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 ;; SEASONS
 
@@ -327,9 +322,7 @@
 (defn tool-get-season [{:keys [season_id include]} config]
   (let [params (if include {"include" include} {})
         resp (api-get (str "/seasons/" season_id) params config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 ;; CREDITS
 
@@ -354,22 +347,16 @@
                      :relationships {:creditable {:data {:type "episodes" :id episode_id}}
                                      :person {:data {:type "people" :id person_id}}}}}
         resp (api-post "/credits" body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-update-credit [{:keys [credit_id role]} config]
   (let [body {:data {:type "credits" :id credit_id :attributes {:type role}}}
         resp (api-patch (str "/credits/" credit_id) body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-remove-credit [{:keys [credit_id]} config]
   (let [resp (api-delete (str "/credits/" credit_id) config)]
-    (if (:error resp)
-      resp
-      {:removed credit_id})))
+    (or-error resp (constantly {:removed credit_id}))))
 
 ;; PEOPLE
 
@@ -391,14 +378,12 @@
 
 (defn tool-get-person [{:keys [person_id]} config]
   (let [resp (api-get (str "/people/" person_id) {} config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-create-person [{:keys [first_name last_name email bio
-                                    born died from_country from_locality from_region
-                                    private_email]}
-                           config]
+                                  born died from_country from_locality from_region
+                                  private_email]}
+                          config]
   (let [attrs (cond-> {:first_name first_name :last_name last_name}
                 email (assoc :public_email email)
                 bio (assoc :biography bio)
@@ -410,9 +395,7 @@
                 (some? private_email) (assoc :private_email private_email))
         body {:data {:type "people" :attributes attrs}}
         resp (api-post "/people" body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 ;; EPISODE VERSIONS
 
@@ -425,15 +408,15 @@
     (if (:error resp)
       resp
       {:versions (mapv (fn [v]
-                          {:id (:id v)
-                           :processing_status (get-in v [:attributes :processing_status])
-                           :status_on_completion (get-in v [:attributes :status_on_completion])
-                           :source_url (get-in v [:attributes :source_url])
-                           :ad_insertion_points_count (get-in v [:attributes :ad_insertion_points_count])
-                           :validation_errors (get-in v [:attributes :validation_errors])
-                           :created_at (get-in v [:attributes :created_at])
-                           :updated_at (get-in v [:attributes :updated_at])})
-                        (:items resp))})))
+                         {:id (:id v)
+                          :processing_status (get-in v [:attributes :processing_status])
+                          :status_on_completion (get-in v [:attributes :status_on_completion])
+                          :source_url (get-in v [:attributes :source_url])
+                          :ad_insertion_points_count (get-in v [:attributes :ad_insertion_points_count])
+                          :validation_errors (get-in v [:attributes :validation_errors])
+                          :created_at (get-in v [:attributes :created_at])
+                          :updated_at (get-in v [:attributes :updated_at])})
+                       (:items resp))})))
 
 (defn tool-create-version [{:keys [episode_id source_url status_on_completion
                                    copy_active_version copy_marker_points]} config]
@@ -445,21 +428,15 @@
                      :attributes attrs
                      :relationships {:episode {:data {:type "episodes" :id episode_id}}}}}
         resp (api-post "/episode_versions" body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-get-version [{:keys [version_id]} config]
   (let [resp (api-get (str "/episode_versions/" version_id) {} config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-delete-version [{:keys [version_id]} config]
   (let [resp (api-delete (str "/episode_versions/" version_id) config)]
-    (if (:error resp)
-      resp
-      {:deleted version_id})))
+    (or-error resp (constantly {:deleted version_id}))))
 
 (defn tool-update-version [{:keys [version_id processing_status source_url status_on_completion
                                    copy_active_version copy_marker_points]} config]
@@ -477,25 +454,19 @@
                 (some? copy_marker_points) (assoc :copy_marker_points copy_marker_points))
         body {:data {:type "episode_versions" :id version_id :attributes attrs}}
         resp (api-patch (str "/episode_versions/" version_id) body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 ;; EPISODE SIBLINGS
 
 (defn tool-get-next-sibling [{:keys [episode_id rss]} config]
   (let [params (when rss {"rss" (str rss)})
         resp (api-get (str "/episodes/" episode_id "/next_sibling") params config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-get-previous-sibling [{:keys [episode_id rss]} config]
   (let [params (when rss {"rss" (str rss)})
         resp (api-get (str "/episodes/" episode_id "/previous_sibling") params config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 ;; IMAGES
 
@@ -508,20 +479,18 @@
                      :attributes attrs
                      :relationships {:bucket {:data {:type "series" :id series_id}}}}}
         resp (api-post "/images" body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 ;; MEDIA ASSETS (audio file details: duration, file_size, cdn_url)
 
+;; TODO: list_media_assets returns raw vector while other list tools return
+;; {:key [...]}. Consider normalizing to {:media_assets [...]} for consistency.
 (defn tool-list-media-assets [{:keys [attachment_id attachment_type]} config]
   (let [params (cond-> {}
                  attachment_id (assoc "attachment_id" attachment_id)
                  attachment_type (assoc "attachment_type" attachment_type))
         resp (api-get "/media_assets" params config)]
-    (if (:error resp)
-      resp
-      (get-in resp [:data :data]))))
+    (or-error resp #(get-in % [:data :data]))))
 
 ;; MARKER POINTS (chapter markers / ad insertion)
 
@@ -562,21 +531,15 @@
                      :relationships {:episode_version {:data {:type "episode_versions"
                                                               :id episode_version_id}}}}}
         resp (api-post "/marker_points" body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-delete-marker-point [{:keys [marker_point_id]} config]
   (let [resp (api-delete (str "/marker_points/" marker_point_id) config)]
-    (if (:error resp)
-      resp
-      {:deleted marker_point_id})))
+    (or-error resp (constantly {:deleted marker_point_id}))))
 
 (defn tool-get-marker-point [{:keys [marker_point_id]} config]
   (let [resp (api-get (str "/marker_points/" marker_point_id) {} config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-update-marker-point [{:keys [marker_point_id position_type start_position
                                         maximum_content_duration maximum_content_count]}
@@ -588,9 +551,7 @@
                 maximum_content_count (assoc :maximum_content_count maximum_content_count))
         body {:data {:type "marker_points" :id marker_point_id :attributes attrs}}
         resp (api-patch (str "/marker_points/" marker_point_id) body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 ;; MARKER POINT CONTENT RULES (ad targeting)
 
@@ -613,8 +574,8 @@
                             (:items resp))})))
 
 (defn tool-create-marker-point-content-rule [{:keys [marker_point_id priority content_type
-                                                    start_at end_at content_id content_type_target]}
-                                            config]
+                                                     start_at end_at content_id content_type_target]}
+                                             config]
   (when-not priority (throw (ex-info "priority is required" {:type :bad-request})))
   (let [attrs (cond-> {:priority priority}
                 content_type (assoc :content_type content_type)
@@ -627,13 +588,11 @@
                      :attributes attrs
                      :relationships rels}}
         resp (api-post "/marker_point_content_rules" body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-update-marker-point-content-rule [{:keys [content_rule_id priority content_type
-                                                    start_at end_at content_id content_type_target]}
-                                            config]
+                                                     start_at end_at content_id content_type_target]}
+                                             config]
   (let [attrs (cond-> {}
                 priority (assoc :priority priority)
                 content_type (assoc :content_type content_type)
@@ -643,15 +602,11 @@
                (and content_id content_type_target)
                (assoc-in [:data :relationships :content] {:data {:type content_type_target :id content_id}}))
         resp (api-patch (str "/marker_point_content_rules/" content_rule_id) body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-delete-marker-point-content-rule [{:keys [content_rule_id]} config]
   (let [resp (api-delete (str "/marker_point_content_rules/" content_rule_id) config)]
-    (if (:error resp)
-      resp
-      {:deleted content_rule_id})))
+    (or-error resp (constantly {:deleted content_rule_id}))))
 
 ;; COMPOUND TOOL — prepare_episode_version
 
@@ -686,9 +641,9 @@
                                                         :maximum_content_duration (or (:maximum_content_duration marker) 120)}
                                                  (:start_position marker) (assoc :start_position (:start_position marker)))
                                       mp-body {:data {:type "marker_points"
-                                                     :attributes mp-attrs
-                                                     :relationships {:episode_version {:data {:type "episode_versions"
-                                                                                              :id version-id}}}}}
+                                                      :attributes mp-attrs
+                                                      :relationships {:episode_version {:data {:type "episode_versions"
+                                                                                               :id version-id}}}}}
                                       mp-resp (api-post "/marker_points" mp-body config)]
                                   (if (:error mp-resp)
                                     {:error true :marker marker :message (:message mp-resp)}
@@ -765,9 +720,7 @@
 
 (defn tool-get-feed-item [{:keys [feed_item_id]} config]
   (let [resp (api-get (str "/feed_items/" feed_item_id) {} config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-create-feed-item [{:keys [series_id feed_id title description itunes_type
                                      released_at premium_status]}
@@ -783,9 +736,7 @@
                feed_id (assoc :feed {:data {:type "feeds" :id feed_id}}))
         body {:data {:type "feed_items" :attributes attrs :relationships rels}}
         resp (api-post "/feed_items" body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-update-feed-item [{:keys [feed_item_id title description itunes_type published
                                      released_at premium_status]}
@@ -799,20 +750,16 @@
                 premium_status (assoc :premium_status premium_status))
         body {:data {:type "feed_items" :id feed_item_id :attributes attrs}}
         resp (api-patch (str "/feed_items/" feed_item_id) body config)]
-    (if (:error resp)
-      resp
-      (:data resp))))
+    (or-error resp :data)))
 
 (defn tool-delete-feed-item [{:keys [feed_item_id]} config]
   (let [resp (api-delete (str "/feed_items/" feed_item_id) config)]
-    (if (:error resp)
-      resp
-      {:deleted feed_item_id})))
+    (or-error resp (constantly {:deleted feed_item_id}))))
 
 ;; ─── Tool Registry ──────────────────────────────────────────────────────────
 
 (def tools
-  [   {:name "list_episodes"
+  [{:name "list_episodes"
     :description "List episodes. IMPORTANT: You MUST provide one of: series_id, series_slug, or season_id. Supports filtering by status, date range, and search query."
     :inputSchema {:type "object"
                   :properties {:ids {:type "array" :items {:type "string"} :description "List of episode UUIDs to fetch"}

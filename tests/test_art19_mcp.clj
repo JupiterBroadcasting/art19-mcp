@@ -26,8 +26,12 @@
 ;; Real http-kit server that mimics https://art19.com.
 ;; Returns JSON:API-shaped responses. Tracks received requests.
 ;; Tests can inspect received-requests to verify what was sent.
+;; Pagination config is set per-test via (reset! pagination-config {...}).
 
 (def ^:private fake-api-state (atom nil))
+
+(def ^:private pagination-config (atom nil))
+;; Example: (reset! pagination-config {:path "/series" :pages 2 :items-per-page 1})
 
 (def ^:private fixture-data
   {:series
@@ -140,12 +144,18 @@
           (if item
             (respond 200 (jsonapi-item item))
             (respond 404 (jsonapi-error 404 "Series not found"))))
-        ;; list — honour filter[slug]
-        (let [slug (get (:query-params request) "filter[slug]")
-              items (if slug
-                      (filter #(= (get-in % [:attributes :slug]) slug)
-                              (:series fixture-data))
-                      (:series fixture-data))]
+        ;; list — honour filter[slug] and q (for resolve-series-id search)
+        (let [slug (get query-params "filter[slug]")
+              q    (get query-params "q")
+              items (cond
+                      slug (filter #(= (get-in % [:attributes :slug]) slug)
+                                   (:series fixture-data))
+                      q    (filter #(let [s (str/lower-case (get-in % [:attributes :slug] ""))
+                                         t (str/lower-case (get-in % [:attributes :title] ""))]
+                                     (or (str/includes? s (str/lower-case q))
+                                         (str/includes? t (str/lower-case q))))
+                                   (:series fixture-data))
+                      :else (:series fixture-data))]
           (respond 200 (jsonapi-list (vec items)))))
 
       ;; GET/POST/PATCH/DELETE /episodes
@@ -417,6 +427,26 @@
         {:status 204 :headers {} :body ""}
 
         :else (respond 405 (jsonapi-error 405 "Method not allowed")))
+
+      ;; GET /paginated_resource — test endpoint for fetch-all-pages pagination.
+      ;; Uses pagination-config atom: {:total 3 :per-page 1}
+      ;; Returns page[n] items with :next link when more pages remain.
+      (and (= method :get) (= uri "/paginated_resource"))
+      (let [pc @pagination-config
+            page-num (try (Integer/parseInt
+                           (get query-params "page%5Bnumber%5D" "1"))
+                          (catch Exception _ 1))
+            per-page (:per-page pc 1)
+            total    (:total pc 0)
+            start    (* (dec page-num) per-page)
+            items    (vec (map (fn [i] {:id (str "pr-" i) :type "paginated_resource"
+                                        :attributes {:index i}})
+                               (range start (min (+ start per-page) total))))]
+        (if (and (seq items) (<= page-num (long (Math/ceil (/ total per-page)))))
+          (let [next-url (when (< page-num (long (Math/ceil (/ total per-page))))
+                           (str "/paginated_resource?page%5Bnumber%5D=" (inc page-num)))]
+            (respond 200 {:data items :links {:next next-url}}))
+          (respond 200 {:data [] :links {:next nil}})))
 
       :else (respond 404 (jsonapi-error 404 (str "Unknown path: " uri))))))
 
@@ -1240,6 +1270,130 @@
                              {:series_id "s-001" :published true}))
     (let [req (last @(:received-requests *fake-api*))]
       (is (str/includes? (or (:query-string req) "") "published=true")))))
+
+;; ─── Critical: fetch-all-pages pagination ────────────────────────────────────
+
+(deftest test-fetch-all-pages-multi-page
+  (testing "fetch-all-pages iterates through all pages"
+    (reset! pagination-config {:total 3 :per-page 1})
+    (try
+      (let [result (art19-mcp/fetch-all-pages "/paginated_resource" {} {})]
+        (is (= 3 (count (:items result))))
+        (is (= "pr-0" (get-in result [:items 0 :id])))
+        (is (= "pr-2" (get-in result [:items 2 :id]))))
+      (finally (reset! pagination-config nil)))))
+
+(deftest test-fetch-all-pages-single-page
+  (testing "fetch-all-pages returns items when all fit on one page"
+    (reset! pagination-config {:total 2 :per-page 10})
+    (try
+      (let [result (art19-mcp/fetch-all-pages "/paginated_resource" {} {})]
+        (is (= 2 (count (:items result)))))
+      (finally (reset! pagination-config nil)))))
+
+(deftest test-fetch-all-pages-empty
+  (testing "fetch-all-pages returns empty when API returns no data"
+    (reset! pagination-config {:total 0 :per-page 1})
+    (try
+      (let [result (art19-mcp/fetch-all-pages "/paginated_resource" {} {})]
+        (is (= [] (:items result))))
+      (finally (reset! pagination-config nil)))))
+
+(deftest test-fetch-all-pages-api-error-mid-pagination
+  (testing "fetch-all-pages returns error when API fails mid-pagination"
+    ;; Use a non-existent path to trigger a 404 on page 2
+    ;; Page 1 succeeds (returns data with :next), page 2 returns 404
+    ;; We simulate this by using a path that returns 404
+    (let [result (art19-mcp/fetch-all-pages "/this-endpoint-does-not-exist" {} {})]
+      (is (:error result)))))
+
+;; ─── Critical: resolve-series-id edge cases ──────────────────────────────────
+
+(deftest test-resolve-series-id-uuid-passthrough
+  (testing "resolve-series-id passes UUID directly without API call"
+    (let [uuid "550e8400-e29b-41d4-a716-446655440000"
+          result (art19-mcp/resolve-series-id uuid {})]
+      (is (= uuid (:id result)))
+      (is (nil? (:error result))))))
+
+(deftest test-resolve-series-id-not-found
+  (testing "resolve-series-id returns error when series not found"
+    (let [result (art19-mcp/resolve-series-id "nonexistent-slug" {})]
+      (is (:error result))
+      (is (str/includes? (:error result) "nonexistent-slug")))))
+
+;; ─── Critical: update_episode_version validation ─────────────────────────────
+
+(deftest test-update-version-invalid-processing-status
+  (testing "update_episode_version rejects invalid processing_status"
+    (let [resp (tool-call! *mcp-url* *session-id* "update_episode_version"
+                           {:version_id "v-001" :processing_status "bogus"})]
+      (is (tool-error? resp))
+      (is (str/includes?
+           (get-in resp [:result :content 0 :text])
+           "processing_status")))))
+
+(deftest test-update-version-invalid-status-on-completion
+  (testing "update_episode_version rejects invalid status_on_completion"
+    (let [resp (tool-call! *mcp-url* *session-id* "update_episode_version"
+                           {:version_id "v-001" :status_on_completion "bogus"})]
+      (is (tool-error? resp))
+      (is (str/includes?
+           (get-in resp [:result :content 0 :text])
+           "status_on_completion")))))
+
+;; ─── Critical: prepare_episode_version validation ────────────────────────────
+
+(deftest test-prepare-version-invalid-status-on-completion
+  (testing "prepare_episode_version rejects invalid status_on_completion"
+    (let [resp (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                           {:episode_id "ep-001" :status_on_completion "bogus"})]
+      (is (tool-error? resp))
+      (is (str/includes?
+           (get-in resp [:result :content 0 :text])
+           "status_on_completion")))))
+
+(deftest test-prepare-version-missing-episode-id
+  (testing "prepare_episode_version requires episode_id"
+    (let [resp (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                           {:status_on_completion "active"})]
+      (is (tool-error? resp))
+      (is (str/includes?
+           (get-in resp [:result :content 0 :text])
+           "episode_id")))))
+
+;; ─── Critical: list_episodes missing-args validation ─────────────────────────
+
+(deftest test-list-episodes-requires-series-or-season
+  (testing "list_episodes returns error when no series_id, series_slug, or season_id"
+    (let [resp (tool-call! *mcp-url* *session-id* "list_episodes" {})]
+      (is (tool-error? resp))
+      (is (str/includes?
+           (get-in resp [:result :content 0 :text])
+           "series_id")))))
+
+(deftest test-list-episodes-invalid-slug
+  (testing "list_episodes returns error for non-existent series slug"
+    (let [resp (tool-call! *mcp-url* *session-id* "list_episodes"
+                           {:series_slug "totally-fake-series"})]
+      (is (tool-error? resp))
+      (is (str/includes?
+           (get-in resp [:result :content 0 :text])
+           "not found")))))
+
+;; ─── Deferred improvements (from expert review) ─────────────────────────────
+;; TODO: Error-path tests — add tests for API 4xx/5xx responses on CRUD ops
+;;   (create_episode, update_episode, delete_episode, create_credit, etc.)
+;;   Currently the fake API always returns success; add a "fail mode" flag.
+;; TODO: search-people with nil/empty q — validate schema rejects it
+;; TODO: list_media_assets returns raw vector while other list tools return
+;;   {:key [...]}. Normalize response shape for consistency.
+;; TODO: Session TTL/cleanup — sessions atom grows forever. Add TTL-based
+;;   expiry or a max-sessions cap.
+;; TODO: create_episode_version with copy_active_version + source_url —
+;;   schema says "cannot be combined" but no validation enforces it.
+;; TODO: find-header direct unit test — the three-way fallback (string key
+;;   → keyword key → case-insensitive scan) is only tested indirectly.
 
 ;; ─── Runner ─────────────────────────────────────────────────────────────────
 
