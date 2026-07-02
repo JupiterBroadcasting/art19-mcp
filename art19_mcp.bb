@@ -165,9 +165,9 @@
 
 ;; EPISODES
 
-(defn tool-list-episodes [{:keys [series_id series_slug season_id published q
-                                  sort year month released_after released_before
-                                  page page_size]}
+(defn tool-list-episodes [{:keys [ids series_id series_slug season_id published q
+                                   sort year month released_after released_before
+                                   itunes_type page page_size]}
                           config]
   (let [sid-result (if series_slug
                      (resolve-series-id series_slug config)
@@ -176,6 +176,7 @@
         _ (when-not (or (:id sid-result) season_id)
             (throw (ex-info "One of series_id, series_slug, or season_id is required" {:type :bad-request})))
         params (cond-> {}
+                 (seq ids) (assoc "ids[]" ids)
                  (:id sid-result) (assoc "series_id" (:id sid-result))
                  season_id (assoc "season_id" season_id)
                  (some? published) (assoc "published" published)
@@ -185,6 +186,7 @@
                  month (assoc "month" (str month))
                  released_after (assoc "released_after" released_after)
                  released_before (assoc "released_before" released_before)
+                 itunes_type (assoc "itunes_type" itunes_type)
                  true (assoc "page[number]" (str (or page 1)))
                  true (assoc "page[size]" (str (or page_size 100))))
         resp (api-get "/episodes" params config)]
@@ -276,8 +278,11 @@
 
 ;; SERIES
 
-(defn tool-list-series [{:keys [q]} config]
-  (let [params (cond-> {} q (assoc "q" q))
+(defn tool-list-series [{:keys [ids q sort]} config]
+  (let [params (cond-> {}
+                 (seq ids) (assoc "ids[]" ids)
+                 q (assoc "q" q)
+                 sort (assoc "sort" sort))
         resp (fetch-all-pages "/series" params config)]
     (if (:error resp)
       resp
@@ -301,13 +306,15 @@
 
 ;; SEASONS
 
-(defn tool-list-seasons [{:keys [series_id series_slug q]} config]
+(defn tool-list-seasons [{:keys [ids series_id series_slug q sort]} config]
   (let [sid-result (if series_slug
                      (resolve-series-id series_slug config)
                      {:id series_id})
         _ (when (:error sid-result) (throw (ex-info (:error sid-result) {})))
         resp (fetch-all-pages "/seasons" (cond-> {"series_id" (:id sid-result)}
-                                           q (assoc "q" q))
+                                           (seq ids) (assoc "ids[]" ids)
+                                           q (assoc "q" q)
+                                           sort (assoc "sort" sort))
                               config)]
     (if (:error resp)
       resp
@@ -317,18 +324,21 @@
                          :number (get-in sn [:attributes :number])})
                       (:items resp))})))
 
-(defn tool-get-season [{:keys [season_id]} config]
-  (let [resp (api-get (str "/seasons/" season_id) {} config)]
+(defn tool-get-season [{:keys [season_id include]} config]
+  (let [params (if include {"include" include} {})
+        resp (api-get (str "/seasons/" season_id) params config)]
     (if (:error resp)
       resp
       (:data resp))))
 
 ;; CREDITS
 
-(defn tool-list-credits [{:keys [episode_id]} config]
+(defn tool-list-credits [{:keys [ids episode_id sort]} config]
   (let [resp (fetch-all-pages "/credits"
-                              {"creditable_id" episode_id
-                               "creditable_type" "Episode"}
+                              (cond-> {"creditable_id" episode_id
+                                       "creditable_type" "Episode"}
+                                (seq ids) (assoc "ids[]" ids)
+                                sort (assoc "sort" sort))
                               config)]
     (if (:error resp)
       resp
@@ -363,8 +373,10 @@
 
 ;; PEOPLE
 
-(defn tool-search-people [{:keys [q page page_size]} config]
+(defn tool-search-people [{:keys [ids q sort page page_size]} config]
   (let [params (cond-> {"q" q}
+                 (seq ids) (assoc "ids[]" ids)
+                 sort (assoc "sort" sort)
                  page (assoc "page[number]" (str page))
                  page_size (assoc "page[size]" (str page_size)))
         resp (api-get "/people" params config)]
@@ -404,8 +416,9 @@
 
 ;; EPISODE VERSIONS
 
-(defn tool-list-versions [{:keys [episode_id feed_item_id]} config]
+(defn tool-list-versions [{:keys [ids episode_id feed_item_id]} config]
   (let [params (cond-> {}
+                 (seq ids) (assoc "ids[]" ids)
                  episode_id (assoc "episode_id" episode_id)
                  feed_item_id (assoc "feed_item_id" feed_item_id))
         resp (fetch-all-pages "/episode_versions" params config)]
@@ -512,8 +525,9 @@
 
 ;; MARKER POINTS (chapter markers / ad insertion)
 
-(defn tool-list-marker-points [{:keys [episode_version_id episode_id series_id season_id type]} config]
+(defn tool-list-marker-points [{:keys [ids episode_version_id episode_id series_id season_id type]} config]
   (let [params (cond-> {}
+                 (seq ids) (assoc "ids[]" ids)
                  episode_version_id (assoc "episode_version_id" episode_version_id)
                  episode_id (assoc "episode_id" episode_id)
                  series_id (assoc "series_id" series_id)
@@ -580,9 +594,11 @@
 
 ;; MARKER POINT CONTENT RULES (ad targeting)
 
-(defn tool-list-marker-point-content-rules [{:keys [marker_point_id]} config]
+(defn tool-list-marker-point-content-rules [{:keys [ids marker_point_id sort]} config]
   (let [params (cond-> {}
-                 marker_point_id (assoc "marker_point_id" marker_point_id))
+                 (seq ids) (assoc "ids[]" ids)
+                 marker_point_id (assoc "marker_point_id" marker_point_id)
+                 sort (assoc "sort" sort))
         resp (fetch-all-pages "/marker_point_content_rules" params config)]
     (if (:error resp)
       resp
@@ -721,7 +737,7 @@
   (let [params (cond-> {}
                  (seq ids) (assoc "ids[]" ids)
                  episode_id (assoc "episode_id" episode_id)
-                 feed_id (assoc "feed_id" feed_id)
+                 (seq feed_id) (assoc "feed_id[]" feed_id)
                  series_id (assoc "series_id" series_id)
                  itunes_type (assoc "itunes_type" itunes_type)
                  (some? published) (assoc "published" published)
@@ -796,10 +812,11 @@
 ;; ─── Tool Registry ──────────────────────────────────────────────────────────
 
 (def tools
-  [{:name "list_episodes"
+  [   {:name "list_episodes"
     :description "List episodes. IMPORTANT: You MUST provide one of: series_id, series_slug, or season_id. Supports filtering by status, date range, and search query."
     :inputSchema {:type "object"
-                  :properties {:series_id {:type "string" :description "Series UUID (use series_slug for JB shows)"}
+                  :properties {:ids {:type "array" :items {:type "string"} :description "List of episode UUIDs to fetch"}
+                               :series_id {:type "string" :description "Series UUID (use series_slug for JB shows)"}
                                :series_slug {:type "string" :description "Series slug or alias: lu, linux-unplugged, twib, tl, cr, sh, self-hosted, coder-radio, the-launch"}
                                :season_id {:type "string" :description "Filter by season UUID"}
                                :published {:type "boolean" :description "Filter to published (true) or unpublished (false) episodes"}
@@ -809,6 +826,7 @@
                                :month {:type "string" :description "Filter by release month (e.g., '1' through '12')"}
                                :released_after {:type "string" :description "ISO 8601 timestamp — only episodes released after this"}
                                :released_before {:type "string" :description "ISO 8601 timestamp — only episodes released before this"}
+                               :itunes_type {:type "string" :description "Filter by episode type: full, trailer, bonus"}
                                :page {:type "integer" :description "Page number (default: 1)"}
                                :page_size {:type "integer" :description "Results per page (max 100, default 100)"}}
                   :required []}}
@@ -868,7 +886,9 @@
    {:name "list_series"
     :description "List all podcast series/shows available in the ART19 account."
     :inputSchema {:type "object"
-                  :properties {:q {:type "string" :description "Filter series by title (case-insensitive)."}}
+                  :properties {:ids {:type "array" :items {:type "string"} :description "List of series UUIDs to fetch"}
+                               :q {:type "string" :description "Filter series by title or slug (case-insensitive)."}
+                               :sort {:type "string" :description "Sort order: created_at, episode_released_at, sort_title, title, updated_at"}}
                   :required []}}
 
    {:name "get_series"
@@ -882,18 +902,27 @@
    {:name "list_seasons"
     :description "List seasons for a series. IMPORTANT: You MUST provide one of: series_slug or series_id."
     :inputSchema {:type "object"
-                  :properties {:series_slug {:type "string" :description "Series slug or JB alias"}
+                  :properties {:ids {:type "array" :items {:type "string"} :description "List of season UUIDs to fetch"}
+                               :series_slug {:type "string" :description "Series slug or JB alias"}
                                :series_id {:type "string" :description "Series UUID"}
-                               :q {:type "string" :description "Filter seasons by title (case-insensitive search)."}}
+                               :q {:type "string" :description "Filter seasons by title (case-insensitive search)."}
+                               :sort {:type "string" :description "Sort order: created_at, sort_title, title, updated_at"}}
                   :required []}}
 
    {:name "get_season"
     :description "Get details for a season."
-    :inputSchema {:type "object" :properties {:season_id {:type "string"}} :required ["season_id"]}}
+    :inputSchema {:type "object"
+                  :properties {:season_id {:type "string" :description "Season UUID"}
+                               :include {:type "string" :description "Related resources to include. Valid options: cover_image, series, series.cover_image, series.network"}}
+                  :required ["season_id"]}}
 
    {:name "list_credits"
     :description "List credits (hosts, guests, producers) for an episode."
-    :inputSchema {:type "object" :properties {:episode_id {:type "string"}} :required ["episode_id"]}}
+    :inputSchema {:type "object"
+                  :properties {:ids {:type "array" :items {:type "string"} :description "List of credit UUIDs to fetch"}
+                               :episode_id {:type "string" :description "Filter by episode UUID"}
+                               :sort {:type "string" :description "Sort order: created_at, position, updated_at"}}
+                  :required ["episode_id"]}}
 
    {:name "add_credit"
     :description "Add a credit to an episode."
@@ -917,7 +946,9 @@
    {:name "search_people"
     :description "Search for people (hosts, guests) by name."
     :inputSchema {:type "object"
-                  :properties {:q {:type "string" :description "Name search query"}
+                  :properties {:ids {:type "array" :items {:type "string"} :description "List of person UUIDs to fetch"}
+                               :q {:type "string" :description "Name search query"}
+                               :sort {:type "string" :description "Sort order: created_at, first_name, last_name, updated_at"}
                                :page {:type "integer"}
                                :page_size {:type "integer"}}
                   :required ["q"]}}
@@ -944,7 +975,8 @@
    {:name "list_episode_versions"
     :description "List audio versions for an episode. Each version corresponds to an audio file."
     :inputSchema {:type "object"
-                  :properties {:episode_id {:type "string" :description "Filter by episode UUID"}
+                  :properties {:ids {:type "array" :items {:type "string"} :description "List of version UUIDs to fetch"}
+                               :episode_id {:type "string" :description "Filter by episode UUID"}
                                :feed_item_id {:type "string" :description "Filter by feed item UUID"}}
                   :required []}}
 
@@ -1012,7 +1044,8 @@
    {:name "list_marker_points"
     :description "List chapter/ad insertion marker points for an episode version. Returns id, position_type_name (preroll/midroll/postroll), start_position, type."
     :inputSchema {:type "object"
-                  :properties {:episode_version_id {:type "string" :description "Filter by a specific episode version UUID."}
+                  :properties {:ids {:type "array" :items {:type "string"} :description "List of marker point UUIDs to fetch"}
+                               :episode_version_id {:type "string" :description "Filter by a specific episode version UUID."}
                                :episode_id {:type "string" :description "Filter by episode ID — returns markers for the live active version of that episode. Use this instead of episode_version_id when you only have the episode ID."}
                                :series_id {:type "string" :description "Filter by series ID"}
                                :season_id {:type "string" :description "Filter by season ID"}
@@ -1053,7 +1086,9 @@
    {:name "list_marker_point_content_rules"
     :description "List ad targeting rules for marker points. Without content rules, markers will not serve any ads."
     :inputSchema {:type "object"
-                  :properties {:marker_point_id {:type "string" :description "Filter by marker point UUID"}
+                  :properties {:ids {:type "array" :items {:type "string"} :description "List of content rule UUIDs to fetch"}
+                               :marker_point_id {:type "string" :description "Filter by marker point UUID"}
+                               :sort {:type "string" :description "Sort order: created_at, priority, updated_at"}
                                :page {:type "integer" :description "Page number"}
                                :page_size {:type "integer" :description "Results per page (max 100)"}}
                   :required []}}
@@ -1114,7 +1149,7 @@
     :inputSchema {:type "object"
                   :properties {:ids {:type "array" :items {:type "string"} :description "List of feed item IDs to filter by"}
                                :episode_id {:type "string" :description "Filter by episode ID"}
-                               :feed_id {:type "string" :description "Filter by feed ID"}
+                               :feed_id {:type "array" :items {:type "string"} :description "Filter by feed UUID(s)"}
                                :series_id {:type "string" :description "Filter by series ID"}
                                :itunes_type {:type "string" :description "Filter by iTunes type: full, bonus, trailer"}
                                :published {:type "boolean" :description "Filter to published (true) or unpublished (false)"}
