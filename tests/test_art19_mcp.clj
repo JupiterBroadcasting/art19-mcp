@@ -304,12 +304,49 @@
       ;; /marker_points
       (str/starts-with? uri "/marker_points")
       (cond
+        ;; /marker_points/{id} - GET or PATCH single marker
+        (and (= method :get) (re-find #"/marker_points/[^?]+" uri))
+        (let [id   (second (re-find #"/marker_points/([^?]+)" uri))
+              item (first (filter #(= (:id %) id) (:marker_points fixture-data)))]
+          (if item
+            (respond 200 (jsonapi-item item))
+            (respond 404 (jsonapi-error 404 "Marker point not found"))))
+
+        (and (= method :patch) (re-find #"/marker_points/[^?]+" uri))
+        (let [id    (second (re-find #"/marker_points/([^?]+)" uri))
+              attrs (get-in body [:data :attributes])
+              base  (first (filter #(= (:id %) id) (:marker_points fixture-data)))
+              merged (update base :attributes merge attrs)]
+          (respond 200 (jsonapi-item (or merged {:id id :type "marker_points" :attributes attrs}))))
+
         (= method :get)   (respond 200 (jsonapi-list (:marker_points fixture-data)))
         (= method :post)  (respond 201 (jsonapi-item
                                         {:id "mp-new" :type "marker_points"
                                          :attributes {:position_type (get-in body [:data :attributes :position_type])
                                                       :position_type_name "midroll"
                                                       :start_position (get-in body [:data :attributes :start_position])}}))
+        (= method :delete) {:status 204 :headers {} :body ""}
+        :else (respond 405 (jsonapi-error 405 "Method not allowed")))
+
+      ;; /marker_point_content_rules
+      (str/starts-with? uri "/marker_point_content_rules")
+      (cond
+        (and (= method :get) (re-find #"/marker_point_content_rules/[^?]+" uri))
+        (let [id   (second (re-find #"/marker_point_content_rules/([^?]+)" uri))
+              item {:id id :type "marker_point_content_rules"
+                    :attributes {:priority 1 :content_type "Campaign"}}]
+          (respond 200 (jsonapi-item item)))
+
+        (and (= method :patch) (re-find #"/marker_point_content_rules/[^?]+" uri))
+        (let [id    (second (re-find #"/marker_point_content_rules/([^?]+)" uri))
+              attrs (get-in body [:data :attributes])]
+          (respond 200 (jsonapi-item {:id id :type "marker_point_content_rules" :attributes attrs})))
+
+        (= method :get)   (respond 200 (jsonapi-list []))
+        (= method :post)  (respond 201 (jsonapi-item
+                                        {:id "cr-rule-new" :type "marker_point_content_rules"
+                                         :attributes {:priority (get-in body [:data :attributes :priority])
+                                                      :content_type (get-in body [:data :attributes :content_type])}}))
         (= method :delete) {:status 204 :headers {} :body ""}
         :else (respond 405 (jsonapi-error 405 "Method not allowed")))
 
@@ -515,7 +552,7 @@
   (testing "tools/list returns all tools with names and schemas"
     (let [resp (mcp-call! *mcp-url* *session-id* "tools/list" {})
           tools (get-in resp [:result :tools])]
-      (is (= 34 (count tools))) ; was 29, now 34 (added 5 feed_items tools)
+      (is (= 40 (count tools))) ; 34 + 6 new marker point content rule tools
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools))
@@ -833,11 +870,19 @@
 ;; ─── Tests: Marker Points ───────────────────────────────────────────────────
 
 (deftest test-list-marker-points
-  (testing "list_marker_points returns markers for episode version"
+  (testing "list_marker_points returns markers with full fields"
     (let [result (tool-result (tool-call! *mcp-url* *session-id* "list_marker_points"
                                           {:episode_version_id "v-001"}))]
       (is (vector? (:marker_points result)))
-      (is (= "preroll" (:position_type (first (:marker_points result))))))))
+      (let [mp (first (:marker_points result))]
+        (is (= "mp-001" (:id mp)))
+        (is (= 0 (:position_type mp)))
+        (is (= "preroll" (:position_type_name mp)))
+        (is (contains? mp :start_position))
+        (is (contains? mp :maximum_content_count))
+        (is (contains? mp :maximum_content_duration))
+        (is (contains? mp :type))
+        (is (contains? mp :default_for))))))
 
 (deftest test-create-marker-point
   (testing "create_marker_point POSTs position_type and returns new marker"
@@ -853,6 +898,52 @@
     (let [result (tool-result (tool-call! *mcp-url* *session-id* "delete_marker_point"
                                           {:marker_point_id "mp-001"}))]
       (is (= "mp-001" (:deleted result))))))
+
+(deftest test-get-marker-point
+  (testing "get_marker_point returns full marker details"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "get_marker_point"
+                                          {:marker_point_id "mp-001"}))]
+      (is (= "mp-001" (get-in result [:data :id]))))))
+
+(deftest test-update-marker-point
+  (testing "update_marker_point PATCHes marker attributes"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "update_marker_point"
+                                          {:marker_point_id "mp-001"
+                                           :start_position 600.0}))]
+      (is (some? result))
+      (let [patch-req (last (filter #(and (= (:method %) :patch)
+                                          (str/includes? (or (:uri %) "") "marker_points"))
+                                    @(:received-requests *fake-api*)))]
+        (is (= 600.0 (get-in patch-req [:body :data :attributes :start_position])))))))
+
+(deftest test-list-marker-point-content-rules
+  (testing "list_marker_point_content_rules returns content rules"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "list_marker_point_content_rules"
+                                          {:marker_point_id "mp-001"}))]
+      (is (vector? (:content_rules result))))))
+
+(deftest test-create-marker-point-content-rule
+  (testing "create_marker_point_content_rule POSTs with correct body"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "create_marker_point_content_rule"
+                                          {:marker_point_id "mp-001"
+                                           :priority 1
+                                           :content_type "Campaign"}))]
+      (is (= "cr-rule-new" (get-in result [:data :id])))
+      (is (= 1 (get-in result [:data :attributes :priority])))
+      (is (= "Campaign" (get-in result [:data :attributes :content_type]))))))
+
+(deftest test-update-marker-point-content-rule
+  (testing "update_marker_point_content_rule PATCHes rule"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "update_marker_point_content_rule"
+                                          {:content_rule_id "cr-rule-001"
+                                           :priority 2}))]
+      (is (some? result)))))
+
+(deftest test-delete-marker-point-content-rule
+  (testing "delete_marker_point_content_rule DELETEs and returns deleted ID"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "delete_marker_point_content_rule"
+                                          {:content_rule_id "cr-rule-001"}))]
+      (is (= "cr-rule-001" (:deleted result))))))
 
 ;; ─── Tests: Feed Items ───────────────────────────────────────────────────
 

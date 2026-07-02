@@ -404,11 +404,15 @@
     (if (:error resp)
       resp
       {:versions (mapv (fn [v]
-                         {:id (:id v)
-                          :processing_status (get-in v [:attributes :processing_status])
-                          :source_url (get-in v [:attributes :source_url])
-                          :created_at (get-in v [:attributes :created_at])})
-                       (:items resp))})))
+                          {:id (:id v)
+                           :processing_status (get-in v [:attributes :processing_status])
+                           :status_on_completion (get-in v [:attributes :status_on_completion])
+                           :source_url (get-in v [:attributes :source_url])
+                           :ad_insertion_points_count (get-in v [:attributes :ad_insertion_points_count])
+                           :validation_errors (get-in v [:attributes :validation_errors])
+                           :created_at (get-in v [:attributes :created_at])
+                           :updated_at (get-in v [:attributes :updated_at])})
+                        (:items resp))})))
 
 (defn tool-create-version [{:keys [episode_id source_url status_on_completion
                                    copy_active_version copy_marker_points]} config]
@@ -438,6 +442,12 @@
 
 (defn tool-update-version [{:keys [version_id processing_status source_url status_on_completion
                                    copy_active_version copy_marker_points]} config]
+  (when (and processing_status
+             (not (#{"submitted" "inactive"} processing_status)))
+    (throw (ex-info "processing_status must be 'submitted' or 'inactive'" {:type :bad-request})))
+  (when (and status_on_completion
+             (not (#{"active" "inactive"} status_on_completion)))
+    (throw (ex-info "status_on_completion must be 'active' or 'inactive'" {:type :bad-request})))
   (let [attrs (cond-> {}
                 processing_status (assoc :processing_status processing_status)
                 source_url (assoc :source_url source_url)
@@ -494,18 +504,27 @@
 
 ;; MARKER POINTS (chapter markers / ad insertion)
 
-(defn tool-list-marker-points [{:keys [episode_version_id episode_id]} config]
+(defn tool-list-marker-points [{:keys [episode_version_id episode_id series_id season_id type]} config]
   (let [params (cond-> {}
                  episode_version_id (assoc "episode_version_id" episode_version_id)
-                 episode_id (assoc "episode_id" episode_id))
+                 episode_id (assoc "episode_id" episode_id)
+                 series_id (assoc "series_id" series_id)
+                 season_id (assoc "season_id" season_id)
+                 type (assoc "type" type))
         resp (fetch-all-pages "/marker_points" params config)]
     (if (:error resp)
       resp
       {:marker_points (mapv (fn [mp]
                               {:id (:id mp)
-                               :position_type (get-in mp [:attributes :position_type_name])
+                               :position_type (get-in mp [:attributes :position_type])
+                               :position_type_name (get-in mp [:attributes :position_type_name])
                                :start_position (get-in mp [:attributes :start_position])
-                               :type (get-in mp [:attributes :type])})
+                               :maximum_content_count (get-in mp [:attributes :maximum_content_count])
+                               :maximum_content_duration (get-in mp [:attributes :maximum_content_duration])
+                               :type (get-in mp [:attributes :type])
+                               :default_for (get-in mp [:attributes :default_for])
+                               :created_at (get-in mp [:attributes :created_at])
+                               :updated_at (get-in mp [:attributes :updated_at])})
                             (:items resp))})))
 
 (defn tool-create-marker-point [{:keys [episode_version_id position_type start_position type
@@ -530,6 +549,87 @@
     (if (:error resp)
       resp
       {:deleted marker_point_id})))
+
+(defn tool-get-marker-point [{:keys [marker_point_id]} config]
+  (let [resp (api-get (str "/marker_points/" marker_point_id) {} config)]
+    (if (:error resp)
+      resp
+      (:data resp))))
+
+(defn tool-update-marker-point [{:keys [marker_point_id position_type start_position type
+                                        maximum_content_duration maximum_content_count default_for]}
+                                config]
+  (let [attrs (cond-> {}
+                position_type (assoc :position_type position_type)
+                (some? start_position) (assoc :start_position start_position)
+                type (assoc :type type)
+                maximum_content_duration (assoc :maximum_content_duration maximum_content_duration)
+                maximum_content_count (assoc :maximum_content_count maximum_content_count)
+                (some? default_for) (assoc :default_for default_for))
+        body {:data {:type "marker_points" :id marker_point_id :attributes attrs}}
+        resp (api-patch (str "/marker_points/" marker_point_id) body config)]
+    (if (:error resp)
+      resp
+      (:data resp))))
+
+;; MARKER POINT CONTENT RULES (ad targeting)
+
+(defn tool-list-marker-point-content-rules [{:keys [marker_point_id]} config]
+  (let [params (cond-> {}
+                 marker_point_id (assoc "marker_point_id" marker_point_id))
+        resp (fetch-all-pages "/marker_point_content_rules" params config)]
+    (if (:error resp)
+      resp
+      {:content_rules (mapv (fn [cr]
+                              {:id (:id cr)
+                               :priority (get-in cr [:attributes :priority])
+                               :content_type (get-in cr [:attributes :content_type])
+                               :start_at (get-in cr [:attributes :start_at])
+                               :end_at (get-in cr [:attributes :end_at])
+                               :created_at (get-in cr [:attributes :created_at])
+                               :updated_at (get-in cr [:attributes :updated_at])})
+                            (:items resp))})))
+
+(defn tool-create-marker-point-content-rule [{:keys [marker_point_id priority content_type
+                                                    start_at end_at content_id content_type_target]}
+                                            config]
+  (when-not priority (throw (ex-info "priority is required" {:type :bad-request})))
+  (let [attrs (cond-> {:priority priority}
+                content_type (assoc :content_type content_type)
+                start_at (assoc :start_at start_at)
+                end_at (assoc :end_at end_at))
+        rels (cond-> {:marker_point {:data {:type "marker_points" :id marker_point_id}}}
+               (and content_id content_type_target)
+               (assoc :content {:data {:type content_type_target :id content_id}}))
+        body {:data {:type "marker_point_content_rules"
+                     :attributes attrs
+                     :relationships rels}}
+        resp (api-post "/marker_point_content_rules" body config)]
+    (if (:error resp)
+      resp
+      (:data resp))))
+
+(defn tool-update-marker-point-content-rule [{:keys [content_rule_id priority content_type
+                                                    start_at end_at content_id content_type_target]}
+                                            config]
+  (let [attrs (cond-> {}
+                priority (assoc :priority priority)
+                content_type (assoc :content_type content_type)
+                start_at (assoc :start_at start_at)
+                end_at (assoc :end_at end_at))
+        body (cond-> {:data {:type "marker_point_content_rules" :id content_rule_id :attributes attrs}}
+               (and content_id content_type_target)
+               (assoc-in [:data :relationships :content] {:data {:type content_type_target :id content_id}}))
+        resp (api-patch (str "/marker_point_content_rules/" content_rule_id) body config)]
+    (if (:error resp)
+      resp
+      (:data resp))))
+
+(defn tool-delete-marker-point-content-rule [{:keys [content_rule_id]} config]
+  (let [resp (api-delete (str "/marker_point_content_rules/" content_rule_id) config)]
+    (if (:error resp)
+      resp
+      {:deleted content_rule_id})))
 
 ;; FEED ITEMS
 
@@ -779,7 +879,6 @@
     :inputSchema {:type "object"
                   :properties {:episode_id {:type "string"}
                                :source_url {:type "string" :description "Public URL to the audio file (MP3/WAV)"}
-                               :status_on_completion {:type "string" :description "Status to set after processing: published, draft"}
                                :copy_active_version {:type "boolean" :description "If true, copies the audio file and source URL from the currently active episode version. Cannot be combined with source_url."}
                                :copy_marker_points {:type "boolean" :description "If true, copies all marker points from the currently active episode version."}}
                   :required ["episode_id" "source_url"]}}
@@ -862,6 +961,58 @@
    {:name "delete_marker_point"
     :description "Delete a marker point."
     :inputSchema {:type "object" :properties {:marker_point_id {:type "string"}} :required ["marker_point_id"]}}
+
+   {:name "get_marker_point"
+    :description "Get full details for a single marker point by ID."
+    :inputSchema {:type "object" :properties {:marker_point_id {:type "string" :description "Marker point UUID"}} :required ["marker_point_id"]}}
+
+   {:name "update_marker_point"
+    :description "Update a marker point's timing, ad limits, or type."
+    :inputSchema {:type "object"
+                  :properties {:marker_point_id {:type "string" :description "Marker point UUID"}
+                               :position_type {:type "integer" :description "0=preroll, 1=midroll, 2=postroll"}
+                               :start_position {:type "number" :description "Position in seconds"}
+                               :type {:type "string" :description "Marker type: AdInsertionPoint or EmbeddedAdPoint"}
+                               :maximum_content_duration {:type "number" :description "Max total ad time in seconds"}
+                               :maximum_content_count {:type "integer" :description "Max number of ads at this marker"}
+                               :default_for {:type "string" :description "CMS template marker (e.g., 'warpfeed') or null"}}
+                  :required ["marker_point_id"]}}
+
+   {:name "list_marker_point_content_rules"
+    :description "List ad targeting rules for marker points. Without content rules, markers will not serve any ads."
+    :inputSchema {:type "object"
+                  :properties {:marker_point_id {:type "string" :description "Filter by marker point UUID"}
+                               :page {:type "integer" :description "Page number"}
+                               :page_size {:type "integer" :description "Results per page (max 100)"}}
+                  :required []}}
+
+   {:name "create_marker_point_content_rule"
+    :description "Create an ad targeting rule for a marker point. Without content rules, markers will not serve any ads."
+    :inputSchema {:type "object"
+                  :properties {:marker_point_id {:type "string" :description "Marker point UUID"}
+                               :priority {:type "integer" :description "Required. Higher = checked first."}
+                               :content_type {:type "string" :description "Campaign (all ads), LiveReadAd (live reads), TraditionalAd (spots)"}
+                               :start_at {:type "string" :description "ISO 8601 datetime. Rule becomes active at this time."}
+                               :end_at {:type "string" :description "ISO 8601 datetime. Rule expires at this time."}
+                               :content_id {:type "string" :description "Target a specific brand, campaign, or advertisement UUID."}
+                               :content_type_target {:type "string" :description "Type of content_id: 'brands', 'campaigns', or 'advertisements'."}}
+                  :required ["marker_point_id" "priority"]}}
+
+   {:name "update_marker_point_content_rule"
+    :description "Update an ad targeting rule on a marker point."
+    :inputSchema {:type "object"
+                  :properties {:content_rule_id {:type "string" :description "Content rule UUID"}
+                               :priority {:type "integer" :description "Higher = checked first."}
+                               :content_type {:type "string" :description "Campaign, LiveReadAd, or TraditionalAd"}
+                               :start_at {:type "string" :description "ISO 8601 datetime"}
+                               :end_at {:type "string" :description "ISO 8601 datetime"}
+                               :content_id {:type "string" :description "Target UUID"}
+                               :content_type_target {:type "string" :description "brands, campaigns, or advertisements"}}
+                  :required ["content_rule_id"]}}
+
+   {:name "delete_marker_point_content_rule"
+    :description "Delete an ad targeting rule from a marker point."
+    :inputSchema {:type "object" :properties {:content_rule_id {:type "string"}} :required ["content_rule_id"]}}
 
    {:name "list_feed_items"
     :description "List feed items. Returns id, title, status, published, itunes_type, released_at, and enclosure_url (public MP3 URL). IMPORTANT: You MUST provide one of: ids, episode_id, feed_id, or series_id."
@@ -956,6 +1107,12 @@
     "list_marker_points" (tool-list-marker-points args config)
     "create_marker_point" (tool-create-marker-point args config)
     "delete_marker_point" (tool-delete-marker-point args config)
+    "get_marker_point" (tool-get-marker-point args config)
+    "update_marker_point" (tool-update-marker-point args config)
+    "list_marker_point_content_rules" (tool-list-marker-point-content-rules args config)
+    "create_marker_point_content_rule" (tool-create-marker-point-content-rule args config)
+    "update_marker_point_content_rule" (tool-update-marker-point-content-rule args config)
+    "delete_marker_point_content_rule" (tool-delete-marker-point-content-rule args config)
     "list_feed_items" (tool-list-feed-items args config)
     "get_feed_item" (tool-get-feed-item args config)
     "create_feed_item" (tool-create-feed-item args config)
