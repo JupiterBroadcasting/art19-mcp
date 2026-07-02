@@ -631,6 +631,82 @@
       resp
       {:deleted content_rule_id})))
 
+;; COMPOUND TOOL — prepare_episode_version
+
+(defn tool-prepare-episode-version
+  "Create a new episode version, add markers with content rules, and submit
+   for processing. The version is created by copying audio from the currently
+   active version. Returns the new version's status — agent polls
+   get_episode_version until processing_status is 'active' or 'processing_failed'."
+  [{:keys [episode_id markers status_on_completion released_at]} config]
+  (when (str/blank? episode_id)
+    (throw (ex-info "episode_id is required" {:type :bad-request})))
+  (let [soc (or status_on_completion "active")
+        _ (when (not (#{"active" "inactive"} soc))
+            (throw (ex-info "status_on_completion must be 'active' or 'inactive'" {:type :bad-request})))
+        create-attrs (cond-> {:copy_active_version true
+                              :copy_marker_points true}
+                       released_at (assoc :released_at released_at))
+        create-body {:data {:type "episode_versions"
+                            :attributes create-attrs
+                            :relationships {:episode {:data {:type "episodes" :id episode_id}}}}}
+        create-resp (api-post "/episode_versions" create-body config)]
+    (if (:error create-resp)
+      create-resp
+      (let [version-id (get-in create-resp [:data :data :id])
+            marker-results (when (seq markers)
+                             (mapv
+                              (fn [marker]
+                                (let [pos-type (or (:position_type marker) 1)
+                                      mp-attrs (cond-> {:position_type pos-type
+                                                        :type (or (:type marker) "AdInsertionPoint")
+                                                        :maximum_content_count (or (:maximum_content_count marker) 2)
+                                                        :maximum_content_duration (or (:maximum_content_duration marker) 120)}
+                                                 (:start_position marker) (assoc :start_position (:start_position marker)))
+                                      mp-body {:data {:type "marker_points"
+                                                     :attributes mp-attrs
+                                                     :relationships {:episode_version {:data {:type "episode_versions"
+                                                                                              :id version-id}}}}}
+                                      mp-resp (api-post "/marker_points" mp-body config)]
+                                  (if (:error mp-resp)
+                                    {:error true :marker marker :message (:message mp-resp)}
+                                    (let [mp-id (get-in mp-resp [:data :data :id])
+                                          cr-priority (or (:priority marker) 1)
+                                          cr-attrs (cond-> {:priority cr-priority}
+                                                     (:content_type marker) (assoc :content_type (:content_type marker))
+                                                     (:start_at marker) (assoc :start_at (:start_at marker))
+                                                     (:end_at marker) (assoc :end_at (:end_at marker)))
+                                          cr-rels (cond-> {:marker_point {:data {:type "marker_points" :id mp-id}}}
+                                                    (and (:content_id marker) (:content_type_target marker))
+                                                    (assoc :content {:data {:type (:content_type_target marker)
+                                                                            :id (:content_id marker)}}))
+                                          cr-body {:data {:type "marker_point_content_rules"
+                                                          :attributes cr-attrs
+                                                          :relationships cr-rels}}
+                                          cr-resp (api-post "/marker_point_content_rules" cr-body config)]
+                                      (if (:error cr-resp)
+                                        {:error true :marker marker :message (:message cr-resp)}
+                                        {:marker_id mp-id :content_rule_id (get-in cr-resp [:data :data :id])})))))
+                              markers))
+            submit-attrs {:processing_status "submitted"
+                          :status_on_completion soc}
+            submit-body {:data {:type "episode_versions"
+                                :id version-id
+                                :attributes submit-attrs}}
+            submit-resp (api-patch (str "/episode_versions/" version-id) submit-body config)]
+        (if (:error submit-resp)
+          {:error true
+           :message (str "Version created (" version-id ") but submit failed: " (:message submit-resp))
+           :version_id version-id}
+          (let [failed-markers (filterv :error (or marker-results []))
+                succeeded-markers (filterv #(not (:error %)) (or marker-results []))]
+            {:version_id version-id
+             :processing_status "submitted"
+             :status_on_completion soc
+             :markers_added (count succeeded-markers)
+             :content_rules_created (count succeeded-markers)
+             :warnings (mapv :message failed-markers)}))))))
+
 ;; FEED ITEMS
 
 (defn tool-list-feed-items [{:keys [ids episode_id feed_id series_id itunes_type published q
@@ -1014,6 +1090,29 @@
     :description "Delete an ad targeting rule from a marker point."
     :inputSchema {:type "object" :properties {:content_rule_id {:type "string"}} :required ["content_rule_id"]}}
 
+   {:name "prepare_episode_version"
+    :description "Create a new version of an episode, add ad markers, and submit for processing. Copies audio from the active version. Returns the new version's status — poll get_episode_version until processing completes."
+    :inputSchema {:type "object"
+                  :properties {:episode_id {:type "string" :description "Episode UUID"}
+                               :markers {:type "array"
+                                         :description "Ad markers to add. Each marker gets a default content rule (Campaign, priority 1). Override per-marker below. If markers is omitted, copies existing markers from active version."
+                                         :items {:type "object"
+                                                 :properties
+                                                 {:start_position {:type "number" :description "Seconds into audio. Required for midroll/preroll."}
+                                                  :position_type {:type "integer" :description "0=preroll, 1=midroll, 2=postroll. Default: 1 (midroll)"}
+                                                  :maximum_content_count {:type "integer" :description "Max ads at this marker. Default: 2"}
+                                                  :maximum_content_duration {:type "number" :description "Max total ad seconds. Default: 120"}
+                                                  :type {:type "string" :description "AdInsertionPoint or EmbeddedAdPoint. Default: AdInsertionPoint"}
+                                                  :content_type {:type "string" :description "Campaign=all, LiveReadAd=live reads, TraditionalAd=spots. Default: Campaign"}
+                                                  :priority {:type "integer" :description "Content rule priority (higher=checked first). Default: 1"}
+                                                  :start_at {:type "string" :description "ISO 8601 datetime. Content rule becomes active at this time."}
+                                                  :end_at {:type "string" :description "ISO 8601 datetime. Content rule expires at this time."}
+                                                  :content_id {:type "string" :description "Target a specific brand, campaign, or advertisement UUID."}
+                                                  :content_type_target {:type "string" :description "Type of content_id: 'brands', 'campaigns', or 'advertisements'."}}}}
+                               :status_on_completion {:type "string" :description "active or inactive. Default: active"}
+                               :released_at {:type "string" :description "ISO 8601 datetime to schedule release. Omit for immediate."}}
+                  :required ["episode_id"]}}
+
    {:name "list_feed_items"
     :description "List feed items. Returns id, title, status, published, itunes_type, released_at, and enclosure_url (public MP3 URL). IMPORTANT: You MUST provide one of: ids, episode_id, feed_id, or series_id."
     :inputSchema {:type "object"
@@ -1113,6 +1212,7 @@
     "create_marker_point_content_rule" (tool-create-marker-point-content-rule args config)
     "update_marker_point_content_rule" (tool-update-marker-point-content-rule args config)
     "delete_marker_point_content_rule" (tool-delete-marker-point-content-rule args config)
+    "prepare_episode_version" (tool-prepare-episode-version args config)
     "list_feed_items" (tool-list-feed-items args config)
     "get_feed_item" (tool-get-feed-item args config)
     "create_feed_item" (tool-create-feed-item args config)
