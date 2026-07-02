@@ -617,6 +617,22 @@
       (is (or (str/includes? (str (:uri slug-req)) "linux-unplugged")
               (str/includes? (str (:query-string slug-req)) "linux-unplugged"))))))
 
+(deftest test-list-seasons
+  (testing "list_seasons returns seasons for a series"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "list_seasons"
+                                          {:series_id "s-001"}))]
+      (is (vector? (:seasons result)))
+      (is (pos? (count (:seasons result))))
+      (is (every? :id (:seasons result)))
+      (is (every? :title (:seasons result))))))
+
+(deftest test-get-season
+  (testing "get_season returns season details"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "get_season"
+                                          {:season_id "sn-001"}))]
+      (is (= "sn-001" (get-in result [:data :id])))
+      (is (some? (get-in result [:data :attributes :title]))))))
+
 ;; ─── Tests: Episodes ────────────────────────────────────────────────────────
 
 (deftest test-list-episodes-by-series-slug
@@ -1117,6 +1133,113 @@
     (let [resp (http/post *mcp-url* {:throw false})]
       (is (= 400 (:status resp)))
       (is (str/includes? (:body resp) "Missing request body")))))
+
+;; ─── Tests: Filter Pass-Through (ids[], sort, itunes_type, include) ───────────
+
+(deftest test-list-episodes-passes-ids
+  (testing "list_episodes passes ids[] to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_episodes"
+                             {:series_id "s-001"
+                              :ids ["ep-001" "ep-002"]}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "ids%5B%5D=ep-001"))
+      (is (str/includes? (or (:query-string req) "") "ids%5B%5D=ep-002")))))
+
+(deftest test-list-episodes-passes-itunes-type
+  (testing "list_episodes passes itunes_type to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_episodes"
+                             {:series_id "s-001"
+                              :itunes_type "bonus"}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "itunes_type=bonus")))))
+
+(deftest test-list-series-passes-ids-and-sort
+  (testing "list_series passes ids[] and sort to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_series"
+                             {:ids ["s-001"] :sort "title"}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "ids%5B%5D=s-001"))
+      (is (str/includes? (or (:query-string req) "") "sort=title")))))
+
+(deftest test-list-seasons-passes-ids-and-sort
+  (testing "list_seasons passes ids[] and sort to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_seasons"
+                             {:series_id "s-001"
+                              :ids ["sn-001"] :sort "created_at"}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "ids%5B%5D=sn-001"))
+      (is (str/includes? (or (:query-string req) "") "sort=created_at")))))
+
+(deftest test-list-credits-passes-ids-and-sort
+  (testing "list_credits passes ids[] and sort to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_credits"
+                             {:episode_id "ep-001"
+                              :ids ["cr-001"] :sort "position"}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "ids%5B%5D=cr-001"))
+      (is (str/includes? (or (:query-string req) "") "sort=position")))))
+
+(deftest test-search-people-passes-ids-and-sort
+  (testing "search_people passes ids[] and sort to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "search_people"
+                             {:q "Chris" :ids ["p-001"] :sort "last_name"}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "ids%5B%5D=p-001"))
+      (is (str/includes? (or (:query-string req) "") "sort=last_name")))))
+
+(deftest test-list-episode-versions-passes-ids
+  (testing "list_episode_versions passes ids[] to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_episode_versions"
+                             {:episode_id "ep-001"
+                              :ids ["v-001"]}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "ids%5B%5D=v-001")))))
+
+(deftest test-list-marker-points-passes-ids
+  (testing "list_marker_points passes ids[] to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_marker_points"
+                             {:episode_version_id "v-001"
+                              :ids ["mp-001"]}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "ids%5B%5D=mp-001")))))
+
+(deftest test-list-marker-point-content-rules-passes-ids-and-sort
+  (testing "list_marker_point_content_rules passes ids[] and sort to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_marker_point_content_rules"
+                             {:marker_point_id "mp-001"
+                              :ids ["cr-rule-001"] :sort "priority"}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "ids%5B%5D=cr-rule-001"))
+      (is (str/includes? (or (:query-string req) "") "sort=priority")))))
+
+(deftest test-list-feed-items-passes-feed-id-as-array
+  (testing "list_feed_items passes feed_id as feed_id[] (array)"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_feed_items"
+                             {:feed_id ["f-001" "f-002"]}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "feed_id%5B%5D=f-001"))
+      (is (str/includes? (or (:query-string req) "") "feed_id%5B%5D=f-002")))))
+
+(deftest test-get-season-passes-include
+  (testing "get_season passes include param to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "get_season"
+                             {:season_id "sn-001" :include "series"}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "include=series")))))
+
+(deftest test-list-episodes-passes-sort
+  (testing "list_episodes passes sort to API"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_episodes"
+                             {:series_id "s-001" :sort "-released_at"}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "sort=-released_at")))))
+
+(deftest test-list-episodes-passes-published-as-boolean
+  (testing "list_episodes passes published as boolean, not string"
+    (tool-result (tool-call! *mcp-url* *session-id* "list_episodes"
+                             {:series_id "s-001" :published true}))
+    (let [req (last @(:received-requests *fake-api*))]
+      (is (str/includes? (or (:query-string req) "") "published=true")))))
 
 ;; ─── Runner ─────────────────────────────────────────────────────────────────
 
