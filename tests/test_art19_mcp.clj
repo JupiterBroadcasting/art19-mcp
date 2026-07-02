@@ -552,7 +552,7 @@
   (testing "tools/list returns all tools with names and schemas"
     (let [resp (mcp-call! *mcp-url* *session-id* "tools/list" {})
           tools (get-in resp [:result :tools])]
-      (is (= 40 (count tools))) ; 34 + 6 new marker point content rule tools
+      (is (= 41 (count tools))) ; 34 + 6 marker CRUD + 1 compound tool
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools))
@@ -944,6 +944,31 @@
     (let [result (tool-result (tool-call! *mcp-url* *session-id* "delete_marker_point_content_rule"
                                           {:content_rule_id "cr-rule-001"}))]
       (is (= "cr-rule-001" (:deleted result))))))
+
+;; ─── Tests: Compound Tool ───────────────────────────────────────────────
+
+(deftest test-prepare-episode-version
+  (testing "prepare_episode_version creates version, adds markers, and submits"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                                          {:episode_id "ep-001"
+                                           :markers [{:start_position 300.0
+                                                      :position_type 1
+                                                      :maximum_content_count 2
+                                                      :maximum_content_duration 120}]}))]
+      (is (some? (:version_id result)))
+      (is (= "submitted" (:processing_status result)))
+      (is (= "active" (:status_on_completion result)))
+      (is (= 1 (:markers_added result)))
+      (is (= 1 (:content_rules_created result)))
+      (is (vector? (:warnings result))))))
+
+(deftest test-prepare-episode-version-no-markers
+  (testing "prepare_episode_version without markers just copies and submits"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                                          {:episode_id "ep-001"}))]
+      (is (some? (:version_id result)))
+      (is (= "submitted" (:processing_status result)))
+      (is (= 0 (:markers_added result))))))
 
 ;; ─── Tests: Feed Items ───────────────────────────────────────────────────
 
