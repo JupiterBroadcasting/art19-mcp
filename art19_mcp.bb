@@ -684,6 +684,34 @@
              :content_rules_created (count succeeded-markers)
              :warnings (mapv :message failed-markers)}))))))
 
+;; WAIT FOR PROCESSING — polling primitive for version processing
+
+(defn tool-wait-for-processing
+  "Poll an episode version until processing completes (active, inactive,
+   processing_failed, or validation_failed). Returns the version data
+   with final processing_status."
+  [{:keys [version_id timeout_seconds poll_interval_seconds]} config]
+  (when (str/blank? version_id)
+    (throw (ex-info "version_id is required" {:type :bad-request})))
+  (let [timeout-ms (* (or timeout_seconds 300) 1000)
+        interval-ms (* (or poll_interval_seconds 5) 1000)
+        deadline (+ (System/currentTimeMillis) timeout-ms)
+        terminal-states #{"active" "inactive" "processing_failed" "validation_failed"}]
+    (loop [attempt 1]
+      (let [resp (api-get (str "/episode_versions/" version_id) {} config)]
+        (if (:error resp)
+          resp
+          (let [data (get-in resp [:data :data])
+                status (get-in data [:attributes :processing_status])]
+            (if (terminal-states status)
+              (assoc data :poll_attempts attempt)
+              (if (> (System/currentTimeMillis) deadline)
+                {:error (str "Timeout after " (or timeout_seconds 300) "s waiting for version "
+                             version_id " to process. Last status: " status
+                             ". Polled " attempt " times every " (or poll_interval_seconds 5) "s.")}
+                (do (Thread/sleep interval-ms)
+                    (recur (inc attempt)))))))))))
+
 ;; FEED ITEMS
 
 (defn tool-list-feed-items [{:keys [ids episode_id feed_id series_id itunes_type published q
@@ -944,6 +972,14 @@
     :description "Delete an episode version."
     :inputSchema {:type "object" :properties {:version_id {:type "string"}} :required ["version_id"]}}
 
+   {:name "wait_for_processing"
+    :description "Poll an episode version until processing completes. Call this after prepare_episode_version or update_episode_version (with processing_status='submitted'). Blocks until processing finishes or timeout. Returns version data with final processing_status."
+    :inputSchema {:type "object"
+                  :properties {:version_id {:type "string" :description "Episode version UUID"}
+                               :timeout_seconds {:type "integer" :description "Max seconds to wait (default: 300)"}
+                               :poll_interval_seconds {:type "integer" :description "Seconds between polls (default: 5)"}}
+                  :required ["version_id"]}}
+
    {:name "update_episode_version"
     :description "Update an episode version. Use to submit a version for processing by setting processing_status to 'submitted'. Also used to make active versions inactive, update source_url, or set status_on_completion."
     :inputSchema {:type "object"
@@ -1168,6 +1204,7 @@
     "get_episode_version" (tool-get-version args config)
     "delete_episode_version" (tool-delete-version args config)
     "update_episode_version" (tool-update-version args config)
+    "wait_for_processing" (tool-wait-for-processing args config)
     "get_episode_next_sibling" (tool-get-next-sibling args config)
     "get_episode_previous_sibling" (tool-get-previous-sibling args config)
     "upload_image" (tool-upload-image args config)
