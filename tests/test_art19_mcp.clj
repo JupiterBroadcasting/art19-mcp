@@ -33,6 +33,13 @@
 (def ^:private pagination-config (atom nil))
 ;; Example: (reset! pagination-config {:path "/series" :pages 2 :items-per-page 1})
 
+(def ^:private version-transition (atom nil))
+;; When set, episode_versions GET handler transitions from submitted to active
+;; after :polls-before-active polls. Example: (reset! version-transition {:polls-before-active 3})
+
+(def ^:private version-poll-counts (atom {}))
+;; Tracks poll count per version when version-transition is active.
+
 (def ^:private fixture-data
   {:series
    [{:id "s-001" :type "series"
@@ -55,7 +62,7 @@
    [{:id "cr-001" :type "credits"
      :attributes {:type "HostCredit"}
      :relationships {:creditable {:data {:id "ep-001" :type "episodes"}}
-                     :person     {:data {:id "p-001" :type "people"}}}}]
+                     :person {:data {:id "p-001" :type "people"}}}}]
 
    :people
    [{:id "p-001" :type "people"
@@ -67,6 +74,10 @@
    [{:id "v-001" :type "episode_versions"
      :attributes {:processing_status "complete" :source_url "https://cdn.example.com/ep600.mp3"
                   :created_at "2026-01-01T10:00:00Z"}
+     :relationships {:episode {:data {:id "ep-001" :type "episodes"}}}}
+    {:id "v-003" :type "episode_versions"
+     :attributes {:processing_status "submitted" :source_url "https://cdn.example.com/processed.mp3"
+                  :created_at "2026-01-01T11:00:00Z"}
      :relationships {:episode {:data {:id "ep-001" :type "episodes"}}}}]
 
    :seasons
@@ -114,24 +125,24 @@
   {:errors [{:status (str status) :detail detail}]})
 
 (defn- fake-api-handler [request]
-  (let [method  (:request-method request)
-        uri     (:uri request)
+  (let [method (:request-method request)
+        uri (:uri request)
         raw-body (:body request)
-        body    (when (seq raw-body)
-                  (try (json/parse-string raw-body true)
-                       (catch Exception e nil)))
+        body (when (seq raw-body)
+               (try (json/parse-string raw-body true)
+                    (catch Exception e nil)))
         query-params (when-let [qs (:query-string request)]
                        (let [params (atom {})]
                          (doseq [pair (clojure.string/split qs #"&")]
                            (let [[k v] (clojure.string/split pair #"=")]
                              (swap! params assoc k v)))
                          @params))
-        _       (swap! (:received-requests @fake-api-state) conj
-                       {:method method :uri uri :body body :query-string (:query-string request)})
+        _ (swap! (:received-requests @fake-api-state) conj
+                 {:method method :uri uri :body body :query-string (:query-string request)})
         respond (fn [status data]
-                  {:status  status
+                  {:status status
                    :headers {"Content-Type" "application/vnd.api+json"}
-                   :body    (json/generate-string data)})]
+                   :body (json/generate-string data)})]
 
     (cond
       ;; GET /series?filter[slug]=...
@@ -146,15 +157,15 @@
             (respond 404 (jsonapi-error 404 "Series not found"))))
         ;; list — honour filter[slug] and q (for resolve-series-id search)
         (let [slug (get query-params "filter[slug]")
-              q    (get query-params "q")
+              q (get query-params "q")
               items (cond
                       slug (filter #(= (get-in % [:attributes :slug]) slug)
                                    (:series fixture-data))
-                      q    (filter #(let [s (str/lower-case (get-in % [:attributes :slug] ""))
-                                         t (str/lower-case (get-in % [:attributes :title] ""))]
-                                     (or (str/includes? s (str/lower-case q))
-                                         (str/includes? t (str/lower-case q))))
-                                   (:series fixture-data))
+                      q (filter #(let [s (str/lower-case (get-in % [:attributes :slug] ""))
+                                       t (str/lower-case (get-in % [:attributes :title] ""))]
+                                   (or (str/includes? s (str/lower-case q))
+                                       (str/includes? t (str/lower-case q))))
+                                (:series fixture-data))
                       :else (:series fixture-data))]
           (respond 200 (jsonapi-list (vec items)))))
 
@@ -176,7 +187,7 @@
                          :attributes {:title (str "Episode before " ep-id) :status "draft"}})))
 
         (and (= method :get) (re-find #"/episodes/[^?/]+" uri))
-        (let [id   (second (re-find #"/episodes/([^?/]+)" uri))
+        (let [id (second (re-find #"/episodes/([^?/]+)" uri))
               item (first (filter #(= (:id %) id) (:episodes fixture-data)))]
           (if item
             (respond 200 (jsonapi-item item))
@@ -197,9 +208,9 @@
                          :attributes {:title title :status "draft" :published false}})))
 
         (= method :patch)
-        (let [id    (second (re-find #"/episodes/([^?/]+)" uri))
+        (let [id (second (re-find #"/episodes/([^?/]+)" uri))
               attrs (get-in body [:data :attributes])
-              base  (first (filter #(= (:id %) id) (:episodes fixture-data)))
+              base (first (filter #(= (:id %) id) (:episodes fixture-data)))
               merged (update base :attributes merge attrs)]
           (respond 200 (jsonapi-item (or merged {:id id :type "episodes" :attributes attrs}))))
 
@@ -239,7 +250,7 @@
       (str/starts-with? uri "/people")
       (cond
         (and (= method :get) (re-find #"/people/[^?]+" uri))
-        (let [id   (second (re-find #"/people/([^?]+)" uri))
+        (let [id (second (re-find #"/people/([^?]+)" uri))
               item (first (filter #(= (:id %) id) (:people fixture-data)))]
           (if item
             (respond 200 (jsonapi-item item))
@@ -259,10 +270,10 @@
         (respond 201 (jsonapi-item
                       {:id "p-new" :type "people"
                        :attributes {:first_name (get-in body [:data :attributes :first_name])
-                                    :last_name  (get-in body [:data :attributes :last_name])
-                                    :full_name  (str (get-in body [:data :attributes :first_name])
-                                                     " "
-                                                     (get-in body [:data :attributes :last_name]))}}))
+                                    :last_name (get-in body [:data :attributes :last_name])
+                                    :full_name (str (get-in body [:data :attributes :first_name])
+                                                    " "
+                                                    (get-in body [:data :attributes :last_name]))}}))
 
         :else (respond 405 (jsonapi-error 405 "Method not allowed")))
 
@@ -270,11 +281,17 @@
       (str/starts-with? uri "/episode_versions")
       (cond
         (and (= method :get) (re-find #"/episode_versions/[^?]+" uri))
-        (let [id   (second (re-find #"/episode_versions/([^?]+)" uri))
+        (let [id (second (re-find #"/episode_versions/([^?]+)" uri))
               item (first (filter #(= (:id %) id) (:episode_versions fixture-data)))]
-          (if item
-            (respond 200 (jsonapi-item item))
-            (respond 404 (jsonapi-error 404 "Version not found"))))
+          (if-let [ts @version-transition]
+            ;; Transition mode: track polls, activate after N polls
+            (let [polls (get (swap! version-poll-counts update id (fnil inc 0)) id 0)]
+              (if (>= polls (:polls-before-active ts 1))
+                (respond 200 (jsonapi-item (assoc-in item [:attributes :processing_status] "active")))
+                (respond 200 (jsonapi-item item))))
+            (if item
+              (respond 200 (jsonapi-item item))
+              (respond 404 (jsonapi-error 404 "Version not found")))))
 
         (= method :get)
         (respond 200 (jsonapi-list (:episode_versions fixture-data)))
@@ -301,7 +318,7 @@
       (str/starts-with? uri "/seasons")
       (cond
         (and (= method :get) (re-find #"/seasons/[^?]+" uri))
-        (let [id   (second (re-find #"/seasons/([^?]+)" uri))
+        (let [id (second (re-find #"/seasons/([^?]+)" uri))
               item (first (filter #(= (:id %) id) (:seasons fixture-data)))]
           (if item (respond 200 (jsonapi-item item))
               (respond 404 (jsonapi-error 404 "Season not found"))))
@@ -316,25 +333,25 @@
       (cond
         ;; /marker_points/{id} - GET or PATCH single marker
         (and (= method :get) (re-find #"/marker_points/[^?]+" uri))
-        (let [id   (second (re-find #"/marker_points/([^?]+)" uri))
+        (let [id (second (re-find #"/marker_points/([^?]+)" uri))
               item (first (filter #(= (:id %) id) (:marker_points fixture-data)))]
           (if item
             (respond 200 (jsonapi-item item))
             (respond 404 (jsonapi-error 404 "Marker point not found"))))
 
         (and (= method :patch) (re-find #"/marker_points/[^?]+" uri))
-        (let [id    (second (re-find #"/marker_points/([^?]+)" uri))
+        (let [id (second (re-find #"/marker_points/([^?]+)" uri))
               attrs (get-in body [:data :attributes])
-              base  (first (filter #(= (:id %) id) (:marker_points fixture-data)))
+              base (first (filter #(= (:id %) id) (:marker_points fixture-data)))
               merged (update base :attributes merge attrs)]
           (respond 200 (jsonapi-item (or merged {:id id :type "marker_points" :attributes attrs}))))
 
-        (= method :get)   (respond 200 (jsonapi-list (:marker_points fixture-data)))
-        (= method :post)  (respond 201 (jsonapi-item
-                                        {:id "mp-new" :type "marker_points"
-                                         :attributes {:position_type (get-in body [:data :attributes :position_type])
-                                                      :position_type_name "midroll"
-                                                      :start_position (get-in body [:data :attributes :start_position])}}))
+        (= method :get) (respond 200 (jsonapi-list (:marker_points fixture-data)))
+        (= method :post) (respond 201 (jsonapi-item
+                                       {:id "mp-new" :type "marker_points"
+                                        :attributes {:position_type (get-in body [:data :attributes :position_type])
+                                                     :position_type_name "midroll"
+                                                     :start_position (get-in body [:data :attributes :start_position])}}))
         (= method :delete) {:status 204 :headers {} :body ""}
         :else (respond 405 (jsonapi-error 405 "Method not allowed")))
 
@@ -342,21 +359,21 @@
       (str/starts-with? uri "/marker_point_content_rules")
       (cond
         (and (= method :get) (re-find #"/marker_point_content_rules/[^?]+" uri))
-        (let [id   (second (re-find #"/marker_point_content_rules/([^?]+)" uri))
+        (let [id (second (re-find #"/marker_point_content_rules/([^?]+)" uri))
               item {:id id :type "marker_point_content_rules"
                     :attributes {:priority 1 :content_type "Campaign"}}]
           (respond 200 (jsonapi-item item)))
 
         (and (= method :patch) (re-find #"/marker_point_content_rules/[^?]+" uri))
-        (let [id    (second (re-find #"/marker_point_content_rules/([^?]+)" uri))
+        (let [id (second (re-find #"/marker_point_content_rules/([^?]+)" uri))
               attrs (get-in body [:data :attributes])]
           (respond 200 (jsonapi-item {:id id :type "marker_point_content_rules" :attributes attrs})))
 
-        (= method :get)   (respond 200 (jsonapi-list []))
-        (= method :post)  (respond 201 (jsonapi-item
-                                        {:id "cr-rule-new" :type "marker_point_content_rules"
-                                         :attributes {:priority (get-in body [:data :attributes :priority])
-                                                      :content_type (get-in body [:data :attributes :content_type])}}))
+        (= method :get) (respond 200 (jsonapi-list []))
+        (= method :post) (respond 201 (jsonapi-item
+                                       {:id "cr-rule-new" :type "marker_point_content_rules"
+                                        :attributes {:priority (get-in body [:data :attributes :priority])
+                                                     :content_type (get-in body [:data :attributes :content_type])}}))
         (= method :delete) {:status 204 :headers {} :body ""}
         :else (respond 405 (jsonapi-error 405 "Method not allowed")))
 
@@ -376,19 +393,19 @@
 
       ;; /media_assets?attachment_id=...&attachment_type=...
       (str/starts-with? uri "/media_assets")
-      (let [att-id   (get query-params "attachment_id")
+      (let [att-id (get query-params "attachment_id")
             att-type (get query-params "attachment_type")
-            items    (if (and att-id att-type)
-                       (filter #(= (get-in % [:relationships :episode_version :data :id]) att-id)
-                               (:media_assets fixture-data))
-                       (:media_assets fixture-data))]
+            items (if (and att-id att-type)
+                    (filter #(= (get-in % [:relationships :episode_version :data :id]) att-id)
+                            (:media_assets fixture-data))
+                    (:media_assets fixture-data))]
         (respond 200 (jsonapi-list items)))
 
       ;; /feed_items
       (str/starts-with? uri "/feed_items")
       (cond
         (and (= method :get) (re-find #"/feed_items/[^?/]+" uri))
-        (let [id   (second (re-find #"/feed_items/([^?/]+)" uri))
+        (let [id (second (re-find #"/feed_items/([^?/]+)" uri))
               item (first (filter #(= (:id %) id) (:feed_items fixture-data)))]
           (if item
             (respond 200 (jsonapi-item item))
@@ -417,9 +434,9 @@
                          :attributes {:title title :status "draft" :published false}})))
 
         (= method :patch)
-        (let [id    (second (re-find #"/feed_items/([^?/]+)" uri))
+        (let [id (second (re-find #"/feed_items/([^?/]+)" uri))
               attrs (get-in body [:data :attributes])
-              base  (first (filter #(= (:id %) id) (:feed_items fixture-data)))
+              base (first (filter #(= (:id %) id) (:feed_items fixture-data)))
               merged (update base :attributes merge attrs)]
           (respond 200 (jsonapi-item (or merged {:id id :type "feed_items" :attributes attrs}))))
 
@@ -437,11 +454,11 @@
                            (get query-params "page%5Bnumber%5D" "1"))
                           (catch Exception _ 1))
             per-page (:per-page pc 1)
-            total    (:total pc 0)
-            start    (* (dec page-num) per-page)
-            items    (vec (map (fn [i] {:id (str "pr-" i) :type "paginated_resource"
-                                        :attributes {:index i}})
-                               (range start (min (+ start per-page) total))))]
+            total (:total pc 0)
+            start (* (dec page-num) per-page)
+            items (vec (map (fn [i] {:id (str "pr-" i) :type "paginated_resource"
+                                     :attributes {:index i}})
+                            (range start (min (+ start per-page) total))))]
         (if (and (seq items) (<= page-num (long (Math/ceil (/ total per-page)))))
           (let [next-url (when (< page-num (long (Math/ceil (/ total per-page))))
                            (str "/paginated_resource?page%5Bnumber%5D=" (inc page-num)))]
@@ -452,13 +469,13 @@
 
 (defn start-fake-api []
   (let [received (atom [])
-        srv      (http-server/run-server
-                  (fn [req]
+        srv (http-server/run-server
+             (fn [req]
                     ;; Body is a stream, read it once and store it
-                    (let [body-str (when (:body req) (slurp (:body req)))]
-                      (fake-api-handler (assoc req :body body-str))))
-                  {:port 0})
-        port     (:local-port (meta srv))]
+               (let [body-str (when (:body req) (slurp (:body req)))]
+                 (fake-api-handler (assoc req :body body-str))))
+             {:port 0})
+        port (:local-port (meta srv))]
     (reset! fake-api-state {:server srv :port port :received-requests received})
     {:port port :stop srv :received-requests received}))
 
@@ -472,12 +489,12 @@
 (defn mcp-init! [base-url]
   (let [resp (http/post base-url
                         {:headers {"Content-Type" "application/json"
-                                   "Accept"       "application/json"}
-                         :body    (json/generate-string
-                                   {:jsonrpc "2.0" :id "init" :method "initialize"
-                                    :params  {:protocolVersion "2025-03-26"
-                                              :capabilities    {}
-                                              :clientInfo      {:name "test" :version "0"}}})})
+                                   "Accept" "application/json"}
+                         :body (json/generate-string
+                                {:jsonrpc "2.0" :id "init" :method "initialize"
+                                 :params {:protocolVersion "2025-03-26"
+                                          :capabilities {}
+                                          :clientInfo {:name "test" :version "0"}}})})
         sid (or (get-in resp [:headers "mcp-session-id"])
                 (get-in resp [:headers :mcp-session-id])
                 (some (fn [[k v]] (when (= "mcp-session-id" (str/lower-case (name k))) v))
@@ -485,22 +502,22 @@
     (when-not sid (throw (ex-info "No session ID in initialize response" {:resp resp})))
     ;; Send initialized notification
     (http/post base-url
-               {:headers {"Content-Type"  "application/json"
+               {:headers {"Content-Type" "application/json"
                           "Mcp-Session-Id" sid}
-                :body    (json/generate-string
-                          {:jsonrpc "2.0" :method "notifications/initialized" :params {}})})
+                :body (json/generate-string
+                       {:jsonrpc "2.0" :method "notifications/initialized" :params {}})})
     sid))
 
 (defn mcp-call! [base-url sid method params]
   (let [resp (http/post base-url
-                        {:headers {"Content-Type"  "application/json"
-                                   "Accept"        "application/json"
+                        {:headers {"Content-Type" "application/json"
+                                   "Accept" "application/json"
                                    "Mcp-Session-Id" sid}
-                         :body    (json/generate-string
-                                   {:jsonrpc "2.0"
-                                    :id      (str (java.util.UUID/randomUUID))
-                                    :method  method
-                                    :params  params})})]
+                         :body (json/generate-string
+                                {:jsonrpc "2.0"
+                                 :id (str (java.util.UUID/randomUUID))
+                                 :method method
+                                 :params params})})]
     (json/parse-string (:body resp) true)))
 
 (defn tool-call! [base-url sid tool-name args]
@@ -526,23 +543,23 @@
 (defn integration-fixture [test-fn]
   (let [fake-api (start-fake-api)
         ;; Fake config pointing at our fake API server
-        config   {:api-token "test-token" :api-credential "test-cred"}
+        config {:api-token "test-token" :api-credential "test-cred"}
         ;; Override base-url in art19-mcp ns to point at fake API
         real-base art19-mcp/base-url
         fake-base (str "http://127.0.0.1:" (:port fake-api))
         ;; Start art19-mcp server
-        mcp-srv  (http-server/run-server
-                  (fn [req] (art19-mcp/handler req config))
-                  {:port 0 :ip "127.0.0.1"})
+        mcp-srv (http-server/run-server
+                 (fn [req] (art19-mcp/handler req config))
+                 {:port 0 :ip "127.0.0.1"})
         mcp-port (:local-port (meta mcp-srv))
-        mcp-url  (str "http://127.0.0.1:" mcp-port "/mcp")]
+        mcp-url (str "http://127.0.0.1:" mcp-port "/mcp")]
     ;; Patch base-url to point at fake API
     (alter-var-root #'art19-mcp/base-url (constantly fake-base))
     (try
       (let [sid (mcp-init! mcp-url)]
-        (binding [*fake-api*   fake-api
-                  *mcp-url*    mcp-url
-                  *mcp-srv*    mcp-srv
+        (binding [*fake-api* fake-api
+                  *mcp-url* mcp-url
+                  *mcp-srv* mcp-srv
                   *session-id* sid]
           (test-fn)))
       (finally
@@ -564,15 +581,15 @@
   (testing "New initialize request creates a new session and returns Mcp-Session-Id"
     (let [resp (http/post *mcp-url*
                           {:headers {"Content-Type" "application/json"}
-                           :body    (json/generate-string
-                                     {:jsonrpc "2.0" :id "1" :method "initialize"
-                                      :params  {:protocolVersion "2025-03-26"
-                                                :capabilities {} :clientInfo {:name "t" :version "0"}}})})
+                           :body (json/generate-string
+                                  {:jsonrpc "2.0" :id "1" :method "initialize"
+                                   :params {:protocolVersion "2025-03-26"
+                                            :capabilities {} :clientInfo {:name "t" :version "0"}}})})
           body (json/parse-string (:body resp) true)
-          sid  (or (get-in resp [:headers "mcp-session-id"])
-                   (get-in resp [:headers :mcp-session-id])
-                   (some (fn [[k v]] (when (= "mcp-session-id" (str/lower-case (name k))) v))
-                         (:headers resp)))]
+          sid (or (get-in resp [:headers "mcp-session-id"])
+                  (get-in resp [:headers :mcp-session-id])
+                  (some (fn [[k v]] (when (= "mcp-session-id" (str/lower-case (name k))) v))
+                        (:headers resp)))]
       (is (= 200 (:status resp)))
       (is (= "2025-03-26" (get-in body [:result :protocolVersion])))
       (is (= "art19-mcp" (get-in body [:result :serverInfo :name])))
@@ -582,7 +599,7 @@
   (testing "tools/list returns all tools with names and schemas"
     (let [resp (mcp-call! *mcp-url* *session-id* "tools/list" {})
           tools (get-in resp [:result :tools])]
-      (is (= 41 (count tools))) ; 34 + 6 marker CRUD + 1 compound tool
+      (is (= 42 (count tools))) ; 41 + 1 wait_for_processing
       (is (every? :name tools))
       (is (every? :description tools))
       (is (every? :inputSchema tools))
@@ -606,17 +623,17 @@
 (deftest test-invalid-session-rejected
   (testing "Request with missing/invalid session ID returns 400"
     (let [resp (http/post *mcp-url*
-                          {:headers {"Content-Type"   "application/json"
+                          {:headers {"Content-Type" "application/json"
                                      "Mcp-Session-Id" "not-a-real-session"}
-                           :throw   false
-                           :body    (json/generate-string
-                                     {:jsonrpc "2.0" :id "1" :method "tools/list" :params {}})})]
+                           :throw false
+                           :body (json/generate-string
+                                  {:jsonrpc "2.0" :id "1" :method "tools/list" :params {}})})]
       (is (= 400 (:status resp))))))
 
 (deftest test-unknown-method-returns-error
   (testing "Unknown JSON-RPC method returns -32601 Method not found"
     (let [resp (mcp-call! *mcp-url* *session-id* "bogus/method" {})
-          err  (:error resp)]
+          err (:error resp)]
       (is (= -32601 (:code err))))))
 
 ;; ─── Tests: Series ──────────────────────────────────────────────────────────
@@ -764,8 +781,8 @@
   (testing "add_credit POSTs with correct role and person/episode relationships"
     (let [result (tool-result (tool-call! *mcp-url* *session-id* "add_credit"
                                           {:episode_id "ep-001"
-                                           :person_id  "p-002"
-                                           :role       "CoHostCredit"}))]
+                                           :person_id "p-002"
+                                           :role "CoHostCredit"}))]
       (is (= "cr-new" (get-in result [:data :id])))
       (let [post-req (last (filter #(and (= (:method %) :post)
                                          (= (:uri %) "/credits"))
@@ -812,7 +829,7 @@
   (testing "create_person POSTs first/last name and returns new person"
     (let [result (tool-result (tool-call! *mcp-url* *session-id* "create_person"
                                           {:first_name "Jupiter"
-                                           :last_name  "Broadcasting"}))]
+                                           :last_name "Broadcasting"}))]
       (is (= "p-new" (get-in result [:data :id])))
       (is (= "Jupiter Broadcasting" (get-in result [:data :attributes :full_name]))))))
 
@@ -828,7 +845,7 @@
 
 (deftest test-create-episode-version
   (testing "create_episode_version POSTs source_url and returns draft version"
-    (let [url    "https://cdn.jb.com/ep601.mp3"
+    (let [url "https://cdn.jb.com/ep601.mp3"
           result (tool-result (tool-call! *mcp-url* *session-id* "create_episode_version"
                                           {:episode_id "ep-001" :source_url url}))]
       (is (= "v-new" (get-in result [:data :id])))
@@ -1126,28 +1143,28 @@
   (testing "Header case-insensitivity"
     (let [sid *session-id*
           resp (http/post *mcp-url*
-                          {:headers {"Content-Type"   "application/json"
+                          {:headers {"Content-Type" "application/json"
                                      "mCP-sESSion-iD" sid}
-                           :body    (json/generate-string
-                                     {:jsonrpc "2.0" :id "1" :method "tools/list" :params {}})})]
+                           :body (json/generate-string
+                                  {:jsonrpc "2.0" :id "1" :method "tools/list" :params {}})})]
       (is (= 200 (:status resp)))
       (is (not (str/includes? (:body resp) "Invalid or missing Mcp-Session-Id")))))
 
   (testing "Malformed JSON body returns 400"
     (let [resp (http/post *mcp-url*
-                          {:headers {"Content-Type"   "application/json"
+                          {:headers {"Content-Type" "application/json"
                                      "Mcp-Session-Id" *session-id*}
-                           :body    "{invalid json}"
-                           :throw   false})]
+                           :body "{invalid json}"
+                           :throw false})]
       (is (= 400 (:status resp)))
       (is (str/includes? (:body resp) "Invalid JSON"))))
 
   (testing "Missing session ID returns 400"
     (let [resp (http/post *mcp-url*
                           {:headers {"Content-Type" "application/json"}
-                           :body    (json/generate-string
-                                     {:jsonrpc "2.0" :id "1" :method "tools/list" :params {}})
-                           :throw   false})]
+                           :body (json/generate-string
+                                  {:jsonrpc "2.0" :id "1" :method "tools/list" :params {}})
+                           :throw false})]
       (is (= 400 (:status resp)))
       (is (str/includes? (:body resp) "Invalid or missing Mcp-Session-Id")))))
 
@@ -1361,6 +1378,40 @@
       (is (str/includes?
            (get-in resp [:result :content 0 :text])
            "episode_id")))))
+
+(deftest test-wait-for-processing
+  (testing "wait_for_processing polls until version is active"
+    (reset! version-transition {:polls-before-active 2})
+    (reset! version-poll-counts {})
+    (try
+      (let [resp (tool-call! *mcp-url* *session-id* "wait_for_processing"
+                             {:version_id "v-003" :timeout_seconds 10 :poll_interval_seconds 1})
+            result (tool-result resp)]
+
+        (is (not (tool-error? resp)) "wait_for_processing should succeed")
+        (is (some? result) "should return version data")
+        (is (= "v-003" (:id result)) "should return correct version")
+        (is (= "active" (get-in result [:attributes :processing_status]))))
+      (finally
+        (reset! version-transition nil)
+        (reset! version-poll-counts {})))))
+
+(deftest test-wait-for-processing-timeout
+  (testing "wait_for_processing times out for non-terminal version"
+    (let [resp (tool-call! *mcp-url* *session-id* "wait_for_processing"
+                           {:version_id "v-003" :timeout_seconds 1 :poll_interval_seconds 1})]
+      (is (tool-error? resp))
+      (is (str/includes?
+           (get-in resp [:result :content 0 :text])
+           "Timeout")))))
+
+(deftest test-wait-for-processing-missing-version
+  (testing "wait_for_processing rejects missing version_id"
+    (let [resp (tool-call! *mcp-url* *session-id* "wait_for_processing" {})]
+      (is (tool-error? resp))
+      (is (str/includes?
+           (get-in resp [:result :content 0 :text])
+           "version_id")))))
 
 ;; ─── Critical: list_episodes missing-args validation ─────────────────────────
 
