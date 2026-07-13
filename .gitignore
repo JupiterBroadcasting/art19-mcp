@@ -1,0 +1,5 @@
+node_modules/
+.clj-kondo/
+.lsp/
+.clojure-mcp/
+*.log

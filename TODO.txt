@@ -1,0 +1,15 @@
+TODO
+
+## Staged (code fix ready, not deployed)
+
+- **create_marker_point** / **update_marker_point**: `end_position` param added to
+  tool schema + implementation. EmbeddedAdPoint markers now work.
+  (nebula marker for ep 674 at 56.113s — not created, just tool fix staged)
+
+- **MCP ping handler**: Server returns -32601 for ping, which floods mcpc bridge
+  logs. Fix: add `:ping` case in `dispatch-rpc` returning `{}`.
+
+## Future
+
+- After creating an auditorium/nebula ad marker (EmbeddedAdPoint),
+  decide how inventory is managed for that spot (content rules? manual insertion?)

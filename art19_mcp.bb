@@ -266,8 +266,11 @@
     (or-error resp (constantly {:deleted episode_id}))))
 
 (defn tool-publish-episode [{:keys [episode_id released_at release_immediately]} config]
-  (let [attrs (cond-> {:published true}
-                released_at (assoc :released_at released_at)
+  (let [now (str (java.time.Instant/now))
+        released-at (or released_at
+                        (when release_immediately now))
+        attrs (cond-> {:published true}
+                released-at (assoc :released_at released-at)
                 (some? release_immediately) (assoc :release_immediately release_immediately))
         body {:data {:type "episodes" :id episode_id :attributes attrs}}
         resp (api-patch (str "/episodes/" episode_id) body config)]
@@ -518,11 +521,12 @@
                                :updated_at (get-in mp [:attributes :updated_at])})
                             (:items resp))})))
 
-(defn tool-create-marker-point [{:keys [episode_version_id position_type start_position type
+(defn tool-create-marker-point [{:keys [episode_version_id position_type start_position end_position type
                                         maximum_content_duration maximum_content_count]}
                                 config]
   (let [attrs (cond-> {:position_type position_type}
                 (some? start_position) (assoc :start_position start_position)
+                (some? end_position) (assoc :end_position end_position)
                 type (assoc :type type)
                 maximum_content_duration (assoc :maximum_content_duration maximum_content_duration)
                 maximum_content_count (assoc :maximum_content_count maximum_content_count))
@@ -541,12 +545,13 @@
   (let [resp (api-get (str "/marker_points/" marker_point_id) {} config)]
     (or-error resp :data)))
 
-(defn tool-update-marker-point [{:keys [marker_point_id position_type start_position
+(defn tool-update-marker-point [{:keys [marker_point_id position_type start_position end_position
                                         maximum_content_duration maximum_content_count]}
                                 config]
   (let [attrs (cond-> {}
                 position_type (assoc :position_type position_type)
                 (some? start_position) (assoc :start_position start_position)
+                (some? end_position) (assoc :end_position end_position)
                 maximum_content_duration (assoc :maximum_content_duration maximum_content_duration)
                 maximum_content_count (assoc :maximum_content_count maximum_content_count))
         body {:data {:type "marker_points" :id marker_point_id :attributes attrs}}
@@ -610,19 +615,58 @@
 
 ;; COMPOUND TOOL — prepare_episode_version
 
+(defn- build-marker-set
+  "Given midrolls (timestamps) or explicit markers, produce the list of marker
+   configs to be created. If midrolls is non-nil, generates the standard
+   template: pre-roll + midrolls + post-roll. Returns nil when neither param
+   is provided (copy existing markers only)."
+  [midrolls markers]
+  (cond
+    (some? midrolls)
+    (let [deduped (distinct midrolls)
+          _ (when (not= (count deduped) (count midrolls))
+              (throw (ex-info "Duplicate timestamps in midrolls" {:type :bad-request})))
+          _ (when (some #(<= % 0) midrolls)
+              (throw (ex-info "Midroll timestamps must be positive" {:type :bad-request})))
+          _ (when (not= (sort midrolls) midrolls)
+              (throw (ex-info "Midroll timestamps must be in ascending order" {:type :bad-request})))]
+      (vec (concat
+            [{:position_type 0
+              :type "AdInsertionPoint"
+              :maximum_content_count 2 :maximum_content_duration 90
+              :content_type "Campaign" :priority 1}]
+            (mapv (fn [ts]
+                    {:position_type 1 :start_position ts
+                     :type "AdInsertionPoint"
+                     :maximum_content_count 3 :maximum_content_duration 180
+                     :content_type "Campaign" :priority 1})
+                  deduped)
+            [{:position_type 2
+              :type "AdInsertionPoint"
+              :maximum_content_count 2 :maximum_content_duration 120
+              :content_type "Campaign" :priority 1}])))
+    (seq markers) markers
+    :else nil))
+
 (defn tool-prepare-episode-version
   "Create a new episode version, add markers with content rules, and submit
    for processing. The version is created by copying audio from the currently
-   active version. Returns the new version's status — agent polls
-   get_episode_version until processing_status is 'active' or 'processing_failed'."
-  [{:keys [episode_id markers status_on_completion released_at]} config]
+   active version. Supports the midrolls convenience param for the standard
+   4-marker template (pre-roll + midrolls + post-roll), or explicit markers
+   for full control. midrolls and markers are mutually exclusive.
+   Returns the new version's status — agent polls get_episode_version until
+   processing_status is 'active' or 'processing_failed'."
+  [{:keys [episode_id midrolls markers status_on_completion released_at]} config]
   (when (str/blank? episode_id)
     (throw (ex-info "episode_id is required" {:type :bad-request})))
+  (when (and midrolls markers)
+    (throw (ex-info "midrolls and markers are mutually exclusive" {:type :bad-request})))
   (let [soc (or status_on_completion "active")
         _ (when (not (#{"active" "inactive"} soc))
             (throw (ex-info "status_on_completion must be 'active' or 'inactive'" {:type :bad-request})))
+        copy-mp? (nil? midrolls)
         create-attrs (cond-> {:copy_active_version true
-                              :copy_marker_points true}
+                              :copy_marker_points copy-mp?}
                        released_at (assoc :released_at released_at))
         create-body {:data {:type "episode_versions"
                             :attributes create-attrs
@@ -631,15 +675,16 @@
     (if (:error create-resp)
       create-resp
       (let [version-id (get-in create-resp [:data :data :id])
-            marker-results (when (seq markers)
+            marker-list (build-marker-set midrolls markers)
+            marker-results (when (seq marker-list)
                              (mapv
                               (fn [marker]
                                 (let [pos-type (or (:position_type marker) 1)
                                       mp-attrs (cond-> {:position_type pos-type
                                                         :type (or (:type marker) "AdInsertionPoint")
                                                         :maximum_content_count (or (:maximum_content_count marker) 2)
-                                                        :maximum_content_duration (or (:maximum_content_duration marker) 120)}
-                                                 (:start_position marker) (assoc :start_position (:start_position marker)))
+                                                        :maximum_content_duration (or (:maximum_content_duration marker) 90)}
+                                                 (contains? marker :start_position) (assoc :start_position (:start_position marker)))
                                       mp-body {:data {:type "marker_points"
                                                       :attributes mp-attrs
                                                       :relationships {:episode_version {:data {:type "episode_versions"
@@ -649,8 +694,10 @@
                                     {:error true :marker marker :message (:message mp-resp)}
                                     (let [mp-id (get-in mp-resp [:data :data :id])
                                           cr-priority (or (:priority marker) 1)
+                                          cr-type (or (:content_type marker)
+                                                      (when (= (:type marker) "AdInsertionPoint") "Campaign"))
                                           cr-attrs (cond-> {:priority cr-priority}
-                                                     (:content_type marker) (assoc :content_type (:content_type marker))
+                                                     cr-type (assoc :content_type cr-type)
                                                      (:start_at marker) (assoc :start_at (:start_at marker))
                                                      (:end_at marker) (assoc :end_at (:end_at marker)))
                                           cr-rels (cond-> {:marker_point {:data {:type "marker_points" :id mp-id}}}
@@ -664,7 +711,7 @@
                                       (if (:error cr-resp)
                                         {:error true :marker marker :message (:message cr-resp)}
                                         {:marker_id mp-id :content_rule_id (get-in cr-resp [:data :data :id])})))))
-                              markers))
+                              marker-list))
             submit-attrs {:processing_status "submitted"
                           :status_on_completion soc}
             submit-body {:data {:type "episode_versions"
@@ -1043,7 +1090,8 @@
                   :properties {:episode_version_id {:type "string"}
                                :position_type {:type "integer" :description "0=preroll, 1=midroll, 2=postroll"}
                                :start_position {:type "number" :description "Position in seconds"}
-                               :type {:type "string" :description "Marker type. Only valid value: AdInsertionPoint"}
+                               :end_position {:type "number" :description "End position in seconds (required for EmbeddedAdPoint)"}
+                               :type {:type "string" :description "Marker type: AdInsertionPoint or EmbeddedAdPoint"}
                                :maximum_content_duration {:type "number" :description "Required. Max total ad time in seconds (float)."}
                                :maximum_content_count {:type "integer" :description "Required. Max number of ads at this marker."}}
                   :required ["episode_version_id" "position_type" "type" "maximum_content_count" "maximum_content_duration"]}}
@@ -1062,6 +1110,7 @@
                   :properties {:marker_point_id {:type "string" :description "Marker point UUID"}
                                :position_type {:type "integer" :description "0=preroll, 1=midroll, 2=postroll"}
                                :start_position {:type "number" :description "Position in seconds"}
+                               :end_position {:type "number" :description "End position in seconds"}
                                :maximum_content_duration {:type "number" :description "Max total ad time in seconds"}
                                :maximum_content_count {:type "integer" :description "Max number of ads at this marker"}}
                   :required ["marker_point_id"]}}
@@ -1105,19 +1154,22 @@
     :inputSchema {:type "object" :properties {:content_rule_id {:type "string"}} :required ["content_rule_id"]}}
 
    {:name "prepare_episode_version"
-    :description "Create a new version of an episode, add ad markers, and submit for processing. Copies audio from the active version. Returns the new version's status — poll get_episode_version until processing completes."
+    :description "Create a new version of an episode, add ad markers, and submit for processing. Copies audio from the active version. Supports the midrolls convenience param for the standard 4-marker template (pre-roll + midrolls + post-roll with Campaign content rules), or markers for full control. midrolls and markers are mutually exclusive. Returns the new version's status — poll get_episode_version until processing completes."
     :inputSchema {:type "object"
                   :properties {:episode_id {:type "string" :description "Episode UUID"}
+                               :midrolls {:type "array"
+                                          :items {:type "number"}
+                                          :description "Midroll timestamps in seconds. Each gets an AdInsertionPoint (position_type=1, 3 ads / 180s max). Pre-roll (2 ads / 90s) and post-roll (2 ads / 120s) are auto-added. All get Campaign content rules. Mutually exclusive with markers."}
                                :markers {:type "array"
-                                         :description "Ad markers to add. Each marker gets a default content rule (Campaign, priority 1). Override per-marker below. If markers is omitted, copies existing markers from active version."
+                                         :description "Ad markers to add. Each marker gets a content rule (Campaign for AdInsertionPoint). If markers is omitted AND midrolls is omitted, copies existing markers from active version. Mutually exclusive with midrolls."
                                          :items {:type "object"
                                                  :properties
                                                  {:start_position {:type "number" :description "Seconds into audio. Required for midroll/preroll."}
                                                   :position_type {:type "integer" :description "0=preroll, 1=midroll, 2=postroll. Default: 1 (midroll)"}
                                                   :maximum_content_count {:type "integer" :description "Max ads at this marker. Default: 2"}
-                                                  :maximum_content_duration {:type "number" :description "Max total ad seconds. Default: 120"}
+                                                  :maximum_content_duration {:type "number" :description "Max total ad seconds. Default: 90"}
                                                   :type {:type "string" :description "AdInsertionPoint or EmbeddedAdPoint. Default: AdInsertionPoint"}
-                                                  :content_type {:type "string" :description "Campaign=all, LiveReadAd=live reads, TraditionalAd=spots. Default: Campaign"}
+                                                  :content_type {:type "string" :description "Campaign=all, LiveReadAd=live reads, TraditionalAd=spots. Default: Campaign for AdInsertionPoint"}
                                                   :priority {:type "integer" :description "Content rule priority (higher=checked first). Default: 1"}
                                                   :start_at {:type "string" :description "ISO 8601 datetime. Content rule becomes active at this time."}
                                                   :end_at {:type "string" :description "ISO 8601 datetime. Content rule expires at this time."}
@@ -1240,6 +1292,9 @@
    :id id
    :result {:tools tools}})
 
+(defn handle-ping [id _params]
+  {:jsonrpc "2.0" :id id :result {}})
+
 (defn handle-tools-call [id params config]
   (let [tool-name (get params :name)
         args (get params :arguments)]
@@ -1291,6 +1346,7 @@
         params (:params body)]
     (case method
       :initialize (handle-initialize id params)
+      :ping (handle-ping id params)
       :notifications/initialized nil ;; notification, no response
       :tools/list (handle-tools-list id params)
       :tools/call (handle-tools-call id params config)
