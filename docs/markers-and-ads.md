@@ -149,4 +149,10 @@ Once an episode version reaches `processing_status: "active"`, ART19 **locks its
 - **Via the ART19 web UI:** you CAN edit markers on a live episode. Under the hood the UI performs a version copy + republish (the episode's `active_version_id` changes; a new `release_periods` entry appears). It just hides that from you.
 - **Practical split:** use the UI for quick one-off tweaks on already-live episodes; use the new-version flow (see `docs/publishing-workflow.md`) for batch backfills where you're already swapping audio / adding midrolls.
 
-**Pre-roll duration default:** 90s (changed from 120s per cohost guidance). Set in `build-marker-set` — applies to new episodes and new-version backfills on the current server code. On the pre-deploy server (port 3007) pass `maximum_content_duration: 90` explicitly.
+**Ad slot duration defaults** (all tunable via `def ^:const` at the top of `art19_mcp.bb`):
+
+- Pre-roll: **90s** (2 ads)
+- Mid-roll: **single = 120s**, **2+ midrolls = 90s each** (3 ads)
+- Post-roll: **180s** (2 ads)
+
+These apply to new episodes and new-version backfills on the current server code. On a pre-deploy server pass them explicitly.

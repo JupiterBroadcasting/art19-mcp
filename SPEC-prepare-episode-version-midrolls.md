@@ -27,8 +27,9 @@ Returns a submitted version with the standard 4-marker template. The agent then 
 | Marker | position_type | start_position | max_ads | max_duration_s | content_type |
 |--------|--------------|---------------|---------|---------------|--------------|
 | Pre-Roll | 0 | 0 | 2 | 90 | Campaign |
-| Mid-Roll 1+ | 1 | from midrolls[] | 3 | 180 | Campaign |
-| Post-Roll | 2 | (omitted — ART19 auto-assigns end) | 2 | 120 | Campaign |
+| Mid-Roll (single) | 1 | from midrolls[] | 3 | 120 | Campaign |
+| Mid-Roll (2+) | 1 | from midrolls[] | 3 | 90 | Campaign |
+| Post-Roll | 2 | (omitted — ART19 auto-assigns end) | 2 | 180 | Campaign |
 
 All get content rules: `{:priority 1 :content_type "Campaign"}`.
 
@@ -89,19 +90,24 @@ Throws `ex-info` with `:type :bad-request` on validation failure.
           _ (when (not= (sort midrolls) midrolls)
               (throw (ex-info "Midroll timestamps must be in ascending order" {:type :bad-request})))]
       (vec (concat
-              [{:position_type 0 :start_position 0
+              [{:position_type 0
                 :type "AdInsertionPoint"
-                :maximum_content_count 2 :maximum_content_duration 90
+                :maximum_content_count default-pre-roll-count
+                :maximum_content_duration default-pre-roll-duration
                 :content_type "Campaign" :priority 1}]
              (mapv (fn [ts]
                      {:position_type 1 :start_position ts
                       :type "AdInsertionPoint"
-                      :maximum_content_count 3 :maximum_content_duration 180
+                      :maximum_content_count default-midroll-count
+                      :maximum_content_duration (if (= 1 (count deduped))
+                                                 default-midroll-duration
+                                                 default-midroll-multi-duration)
                       :content_type "Campaign" :priority 1})
                    deduped)
               [{:position_type 2
                 :type "AdInsertionPoint"
-                :maximum_content_count 2 :maximum_content_duration 120
+                :maximum_content_count default-post-roll-count
+                :maximum_content_duration default-post-roll-duration
                 :content_type "Campaign" :priority 1}]))]
     (seq markers) markers
     :else nil))
@@ -163,10 +169,10 @@ cr-attrs (cond-> {:priority cr-priority}
                             :midrolls {:type "array"
                                        :items {:type "number"}
                                        :description "Midroll timestamps in seconds.
-                                         Each gets a midroll AdInsertionPoint with 3 ads / 180s max.
-                                          Pre-roll (2 ads / 90s) and post-roll (2 ads / 120s) are
-                                         auto-added. All get Campaign content rules.
-                                         Mutually exclusive with markers param."}
+                                         Each gets a midroll AdInsertionPoint. Ad slot defaults (tunable
+                                         via constants at top of art19_mcp.bb): pre-roll 90s, single
+                                         midroll 120s / 2+ midrolls 90s each, post-roll 180s. All get
+                                         Campaign content rules. Mutually exclusive with markers param."}
                             :markers {:type "array"
                                       :description "Ad markers to add. Each marker gets a content
                                         rule. If omitted when midrolls is also omitted, copies
@@ -185,7 +191,8 @@ cr-attrs (cond-> {:priority cr-priority}
 
 | Test name | What it covers | Key assertions |
 |-----------|---------------|----------------|
-| `test-prepare-with-midrolls` | Happy path: `midrolls: [300, 900]` | 4 markers created (pre + 2 mid + post), all Campaign rules, version submitted, `copy_marker_points` = false in API body |
+| `test-prepare-with-midrolls` | Happy path: `midrolls: [300, 900]` | 4 markers (pre + 2 mid + post); pre 90s, each mid 90s, post 180s; all Campaign; submitted; `copy_marker_points` = false |
+| `test-prepare-with-midrolls-single` | Single midroll `midrolls: [600]` | 3 markers (pre + 1 mid + post); mid 120s |
 | `test-prepare-with-midrolls-empty` | Edge: `midrolls: []` | Only pre + post created (2 markers), no midrolls |
 | `test-prepare-with-midrolls-and-markers-errors` | Error: both params provided | Returns error about mutual exclusivity |
 | `test-prepare-with-midrolls-duplicate` | Validation: `midrolls: [300, 300]` | Returns error about duplicates |

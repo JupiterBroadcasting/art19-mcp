@@ -28,12 +28,12 @@ update_marker_point(marker_point_id: "pre-marker", start_position: 0)
 
 create_marker_point(episode_version_id: "…", position_type: 1,
                     start_position: 1608, type: "AdInsertionPoint",
-                    max_content_count: 3, max_content_duration: 180)
+                    max_content_count: 3, max_content_duration: 120)
 ;; → midroll marker_id
 
 create_marker_point(episode_version_id: "…", position_type: 2,
                     type: "AdInsertionPoint",
-                    max_content_count: 2, max_content_duration: 120)
+                    max_content_count: 2, max_content_duration: 180)
 ;; → post-roll marker_id
 
 ;; 5. Content rules (one per marker)
@@ -83,10 +83,11 @@ list_marker_points(episode_version_id: "…")
 update_marker_point(marker_point_id: "pre-roll",
                     maximum_content_duration: 90)
 
-;; 4. Add a new midroll (keep existing ones — DON'T delete unless replacing)
+;; 4. Add a new midroll (keep existing ones — DON'T delete unless replacing).
+;;    If this makes 2+ midrolls total, use 90s each; a lone midroll is 120s.
 create_marker_point(episode_version_id: "…", position_type: 1,
                     start_position: 1800, type: "AdInsertionPoint",
-                    maximum_content_count: 3, maximum_content_duration: 180)
+                    max_content_count: 3, maximum_content_duration: 90)
 create_marker_point_content_rule(marker_point_id: "new-midroll",
                                  priority: 1, content_type: "Campaign")
 
@@ -99,9 +100,7 @@ publish_episode(episode_id: "…", released_at: NOW, release_immediately: true)
 list_feed_items(episode_id: "…")
 ```
 
-**Pre-roll default:** 90s (set in `build-marker-set`). New-server backfills get it
-automatically; old-server (port 3007 pre-deploy) needs the explicit
-`update_marker_point` call in step 3.
+**Ad slot defaults:** Pre-roll 90s · Midroll single 120s / 2+ midrolls 90s each · Post-roll 180s (all tunable via `def ^:const` at top of `art19_mcp.bb`). New-server backfills get them automatically; old-server (port 3007 pre-deploy) needs explicit `update_marker_point` calls (as in step 3+4).
 
 **Editing live episodes WITHOUT a new version:** The ART19 web UI *can* edit
 markers on an `active` version (it silently does a version copy + republish
@@ -130,7 +129,7 @@ prepare_episode_version(episode_id: "…",
 
 | Rule | Detail |
 |------|--------|
-| **Ad slot defaults** | Pre-roll 90s / Midroll 180s / Post-roll 120s (set in `build-marker-set`). Pre-roll shortened from 120s→90s per cohost guidance. |
+| **Ad slot defaults** | Pre-roll 90s (2 ads) / Midroll single 120s, 2+ midrolls 90s each (3 ads) / Post-roll 180s (2 ads). All tunable via `def ^:const` at top of `art19_mcp.bb`. Pre-roll shortened 120s→90s per cohost guidance. |
 | **Active versions are locked** | Once an episode_version is `active` (published), its markers can't be edited via API (`not_eligible_for_changes`). To change a published episode's markers/durations, create a NEW version (copy audio + markers) on a draft, edit, then submit + publish. |
 | **FLAC works** | ART19 accepts FLAC despite docs saying MP3/WAV |
 | **released_at required** | Must provide `released_at` even with `release_immediately: true` (tool auto-sets if omitted) |
