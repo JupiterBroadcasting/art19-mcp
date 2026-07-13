@@ -21,6 +21,18 @@
 (def protocol-version "2025-03-26")
 (def server-info {:name "art19-mcp" :version "1.0.0"})
 
+;; Ad slot defaults — single source of truth for all new episode templates.
+;; Tune here without hunting through code. Values: seconds (max ad duration)
+;; and count (max ads per slot). Midroll duration depends on how many midrolls
+;; exist: a single midroll gets the full duration; 2+ midrolls split capacity.
+(def ^:const default-pre-roll-duration 90)
+(def ^:const default-pre-roll-count 2)
+(def ^:const default-midroll-duration 120) ;; 1 midroll
+(def ^:const default-midroll-multi-duration 90) ;; 2+ midrolls
+(def ^:const default-midroll-count 3)
+(def ^:const default-post-roll-duration 180)
+(def ^:const default-post-roll-count 2)
+
 (defn load-config-file []
   (let [path (str (System/getProperty "user.home") "/.config/art19/config.edn")]
     (when (.exists (java.io.File. path))
@@ -629,21 +641,27 @@
           _ (when (some #(<= % 0) midrolls)
               (throw (ex-info "Midroll timestamps must be positive" {:type :bad-request})))
           _ (when (not= (sort midrolls) midrolls)
-              (throw (ex-info "Midroll timestamps must be in ascending order" {:type :bad-request})))]
+              (throw (ex-info "Midroll timestamps must be in ascending order" {:type :bad-request})))
+          mid-duration (if (= 1 (count deduped))
+                         default-midroll-duration
+                         default-midroll-multi-duration)]
       (vec (concat
             [{:position_type 0
               :type "AdInsertionPoint"
-              :maximum_content_count 2 :maximum_content_duration 90
+              :maximum_content_count default-pre-roll-count
+              :maximum_content_duration default-pre-roll-duration
               :content_type "Campaign" :priority 1}]
             (mapv (fn [ts]
                     {:position_type 1 :start_position ts
                      :type "AdInsertionPoint"
-                     :maximum_content_count 3 :maximum_content_duration 180
+                     :maximum_content_count default-midroll-count
+                     :maximum_content_duration mid-duration
                      :content_type "Campaign" :priority 1})
                   deduped)
             [{:position_type 2
               :type "AdInsertionPoint"
-              :maximum_content_count 2 :maximum_content_duration 120
+              :maximum_content_count default-post-roll-count
+              :maximum_content_duration default-post-roll-duration
               :content_type "Campaign" :priority 1}])))
     (seq markers) markers
     :else nil))
@@ -683,7 +701,7 @@
                                       mp-attrs (cond-> {:position_type pos-type
                                                         :type (or (:type marker) "AdInsertionPoint")
                                                         :maximum_content_count (or (:maximum_content_count marker) 2)
-                                                        :maximum_content_duration (or (:maximum_content_duration marker) 90)}
+                                                        :maximum_content_duration (or (:maximum_content_duration marker) default-pre-roll-duration)}
                                                  (contains? marker :start_position) (assoc :start_position (:start_position marker)))
                                       mp-body {:data {:type "marker_points"
                                                       :attributes mp-attrs
@@ -1159,7 +1177,7 @@
                   :properties {:episode_id {:type "string" :description "Episode UUID"}
                                :midrolls {:type "array"
                                           :items {:type "number"}
-                                          :description "Midroll timestamps in seconds. Each gets an AdInsertionPoint (position_type=1, 3 ads / 180s max). Pre-roll (2 ads / 90s) and post-roll (2 ads / 120s) are auto-added. All get Campaign content rules. Mutually exclusive with markers."}
+                                          :description "Midroll timestamps in seconds. Each gets an AdInsertionPoint (position_type=1). Ad slot defaults (all tunable via constants at top of art19_mcp.bb): pre-roll 90s (2 ads), single midroll 120s / 2+ midrolls 90s each (3 ads), post-roll 180s (2 ads). All get Campaign content rules. Mutually exclusive with markers."}
                                :markers {:type "array"
                                          :description "Ad markers to add. Each marker gets a content rule (Campaign for AdInsertionPoint). If markers is omitted AND midrolls is omitted, copies existing markers from active version. Mutually exclusive with midrolls."
                                          :items {:type "object"

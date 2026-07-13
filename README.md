@@ -202,7 +202,7 @@ probe → create_episode → create_episode_version → markers → rules
 1. **Create episode** — `create_episode(series_slug, title, description, itunes_type)`
 1. **Create version** — `create_episode_version(episode_id, source_url, status_on_completion="active")`
    - `source_url` points to public HTTP server (FLAC works despite docs saying MP3/WAV)
-1. **Markers** — `create_marker_point` × 3 (pre-roll → midroll → post-roll), incremental `position_type` (0→1→2). Ad slot defaults: pre-roll 90s / midroll 180s / post-roll 120s (Campaign content rules)
+1. **Markers** — `create_marker_point` × 3 (pre-roll → midroll → post-roll), incremental `position_type` (0→1→2). Ad slot defaults: pre-roll 90s / midroll single 120s, 2+ midrolls 90s each / post-roll 180s (Campaign content rules; all tunable via `def ^:const` at top of `art19_mcp.bb`)
 1. **Content rules** — `create_marker_point_content_rule` × 3, `content_type: "Campaign"`
 1. **Submit** — `update_episode_version(version_id, processing_status="submitted", status_on_completion="active")`
 1. **Wait** — `wait_for_processing(version_id, timeout_seconds=300, poll_interval_seconds=10)`
@@ -225,7 +225,7 @@ create_episode_version (copy_active_version + copy_marker_points) → edit pre-r
 1. **New version** — `create_episode_version(episode_id, copy_active_version=true, copy_marker_points=true, status_on_completion="active")`
    - `copy_active_version: true` **reuses the existing audio — no re-upload**. Only a reprocess (~4-5 min) + republish.
    - `copy_marker_points: true` copies the existing markers onto the draft so you only touch what changed.
-1. **Set pre-roll to 90s** — `update_marker_point(pre_roll_id, maximum_content_duration=90)` (new default; pass explicitly on the pre-deploy server).
+1. **Set ad slots to defaults** — pre-roll 90s, midroll(s) 120s (single) / 90s each (2+), post-roll 180s via `update_marker_point(..., maximum_content_duration=…)` (new defaults; pass explicitly on the pre-deploy server).
 1. **Add midroll** — `create_marker_point(position_type=1, start_position=…)` + `create_marker_point_content_rule(priority=1, content_type="Campaign")`
 1. **Submit / Wait / Publish / Verify** — as in the new-episode flow above.
 

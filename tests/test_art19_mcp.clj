@@ -1087,19 +1087,49 @@
           ;; Find the POST to episode_versions to check copy_marker_points
           create-req (first (filter #(and (= (:method %) :post)
                                           (str/includes? (or (:uri %) "") "episode_versions"))
-                                    requests))]
+                                    requests))
+          mp-requests (filter #(and (= (:method %) :post)
+                                    (str/includes? (or (:uri %) "") "marker_points"))
+                              requests)
+          by-type (group-by #(get-in % [:body :data :attributes :position_type]) mp-requests)
+          pre-roll-req (first (get by-type 0))
+          mid-roll-reqs (get by-type 1)
+          post-roll-req (first (get by-type 2))]
       (is (some? (:version_id result)))
       (is (= "submitted" (:processing_status result)))
       (is (= 4 (:markers_added result)))
       (is (= 4 (:content_rules_created result)))
       (is (false? (get-in create-req [:body :data :attributes :copy_marker_points])))
-      ;; Pre-roll default duration is 90s (changed from 120s per cohost guidance)
-      (let [mp-requests (filter #(and (= (:method %) :post)
-                                      (str/includes? (or (:uri %) "") "marker_points"))
-                                requests)
-            pre-roll-req (first mp-requests)]
-        (is (= 0 (get-in pre-roll-req [:body :data :attributes :position_type])))
-        (is (= 90 (get-in pre-roll-req [:body :data :attributes :maximum_content_duration])))))))
+      ;; 2+ midrolls -> each gets 90s (default-midroll-multi-duration)
+      (is (= 2 (count mid-roll-reqs)))
+      (doseq [m mid-roll-reqs]
+        (is (= 90 (get-in m [:body :data :attributes :maximum_content_duration]))))
+      ;; Pre-roll default duration is 90s
+      (is (= 0 (get-in pre-roll-req [:body :data :attributes :position_type])))
+      (is (= 90 (get-in pre-roll-req [:body :data :attributes :maximum_content_duration])))
+      ;; Post-roll default duration is 180s
+      (is (= 2 (get-in post-roll-req [:body :data :attributes :position_type])))
+      (is (= 180 (get-in post-roll-req [:body :data :attributes :maximum_content_duration]))))))
+
+(deftest test-prepare-with-midrolls-single
+  (testing "prepare_episode_version with a single midroll gets 120s default"
+    (reset! (:received-requests *fake-api*) [])
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                                          {:episode_id "ep-001"
+                                           :midrolls [600.0]}))
+          requests @(:received-requests *fake-api*)
+          mp-requests (filter #(and (= (:method %) :post)
+                                    (str/includes? (or (:uri %) "") "marker_points"))
+                              requests)
+          by-type (group-by #(get-in % [:body :data :attributes :position_type]) mp-requests)
+          mid-roll-reqs (get by-type 1)]
+      (is (some? (:version_id result)))
+      (is (= "submitted" (:processing_status result)))
+      (is (= 3 (:markers_added result)))
+      (is (= 3 (:content_rules_created result)))
+      ;; Single midroll -> 120s (default-midroll-duration)
+      (is (= 1 (count mid-roll-reqs)))
+      (is (= 120 (get-in (first mid-roll-reqs) [:body :data :attributes :maximum_content_duration]))))))
 
 (deftest test-ping-handler
   (testing "ping returns empty result (keeps mcpc bridge alive)"
