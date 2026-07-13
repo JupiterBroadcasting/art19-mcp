@@ -20,6 +20,9 @@ art19-mcp/
 ├── AGENTS.md         # Agent-specific context
 ├── .art19/
 │   └── state.edn     # Project state tracking
+├── docs/
+│   ├── markers-and-ads.md    # Ad insertion (SSAI) vs embedded ad points
+│   └── mcpc-helper.md        # How to use mcpc CLI to call the MCP server
 ├── tests/
 │   └── test_art19_mcp.clj  # Integration tests (fake API)
 ├── CHANGELOG.md      # Release history
@@ -177,13 +180,65 @@ Add to `mcp-servers.edn`:
 |------|-------------|
 | `list_media_assets` | List media assets for an episode version. NOTE: Returns empty after episode is published - use feed_items instead. |
 
-### Marker Points / Chapters (3)
+### Marker Points / Chapters (4)
 
 | Tool | Description |
 |------|-------------|
 | `list_marker_points` | Chapter/ad insertion markers on a version |
 | `create_marker_point` | Add marker: 0=preroll, 1=midroll, 2=postroll |
+| `update_marker_point` | Update marker timing, position type, or ad limits |
 | `delete_marker_point` | Remove a marker |
+
+## Publishing Workflow
+
+### New Episode (Full Pipeline)
+
+```
+probe → create_episode → create_episode_version → markers → rules
+  → submit → wait_for_processing → publish_episode → verify
+```
+
+1. **Probe** — `get_series`, `list_episodes` (verify API access, check last episode)
+1. **Create episode** — `create_episode(series_slug, title, description, itunes_type)`
+1. **Create version** — `create_episode_version(episode_id, source_url, status_on_completion="active")`
+   - `source_url` points to public HTTP server (FLAC works despite docs saying MP3/WAV)
+1. **Markers** — `create_marker_point` × 3 (pre-roll → midroll → post-roll), incremental `position_type` (0→1→2). Ad slot defaults: pre-roll 90s / midroll 180s / post-roll 120s (Campaign content rules)
+1. **Content rules** — `create_marker_point_content_rule` × 3, `content_type: "Campaign"`
+1. **Submit** — `update_episode_version(version_id, processing_status="submitted", status_on_completion="active")`
+1. **Wait** — `wait_for_processing(version_id, timeout_seconds=300, poll_interval_seconds=10)`
+1. **Publish** — `publish_episode(episode_id, released_at=NOW, release_immediately=true)`
+1. **Verify** — `list_feed_items(episode_id)` — check `enclosure_url` is live
+
+**One-shot shortcut** (future server): `prepare_episode_version(episode_id, midrolls=[t1, t2])` — creates version, pre-roll + midrolls + post-roll + Campaign rules + submits in one call. Then just `wait_for_processing` + `publish_episode`.
+
+### Backfill: Replace Audio / Add Midroll (new version)
+
+Used when an episode is already live and you want to swap audio, add a midroll,
+or adjust ad slots. ART19 requires a fresh version because markers on an `active`
+version are **locked** (`not_eligible_for_changes`). See `docs/publishing-workflow.md`
+for the full runbook.
+
+```
+create_episode_version (copy_active_version + copy_marker_points) → edit pre-roll → add midrolls → submit → wait → publish
+```
+
+1. **New version** — `create_episode_version(episode_id, copy_active_version=true, copy_marker_points=true, status_on_completion="active")`
+   - `copy_active_version: true` **reuses the existing audio — no re-upload**. Only a reprocess (~4-5 min) + republish.
+   - `copy_marker_points: true` copies the existing markers onto the draft so you only touch what changed.
+1. **Set pre-roll to 90s** — `update_marker_point(pre_roll_id, maximum_content_duration=90)` (new default; pass explicitly on the pre-deploy server).
+1. **Add midroll** — `create_marker_point(position_type=1, start_position=…)` + `create_marker_point_content_rule(priority=1, content_type="Campaign")`
+1. **Submit / Wait / Publish / Verify** — as in the new-episode flow above.
+
+> **UI vs API:** The ART19 web UI *can* edit markers on a live episode (it silently
+> does a version copy + republish). Our MCP tools cannot — use the new-version flow
+> above for batch backfills; use the UI for one-off tweaks on already-live episodes.
+
+### Marker Ordering Gotchas
+
+- **Incremental position_type required** — create pre-roll (type 0) first, then midroll (type 1), then post-roll (type 2). ART enforces this order.
+- **Pre-roll needs start_position=0** — creating pre-roll without `start_position` blocks midroll creation. After creating pre-roll with null start, update it to `start_position=0` via `update_marker_point`, then create midroll.
+- **Post-roll depends on midroll** — post-roll (type 2) can only be created after at least one midroll (type 1) exists.
+- **Pre-roll and post-roll don't need start_position** per se (ART19 auto-calculates post-roll from audio duration), but pre-roll DOES need one for correct ordering behavior.
 
 ### Feed Items (5)
 
@@ -274,7 +329,19 @@ Tests use a fake API server that mimics ART19's responses. Tests call the real s
 
 **Pagination:** `fetch-all-pages` caps at 20 pages (2000 items). For `list_episodes` on large feeds, encourage the agent to use `released_after`/`released_before` or `year`/`month` filters rather than paginating everything.
 
-**Post-publish media_assets:** After an episode is published, `list_media_assets` returns an empty array. This is ART19 API behavior. To get the public MP3 URL after publish, use `list_feed_items` (returns `enclosure_url`) or `get_episode` (includes `enclosure_url` in response).
+**Enclosure/MP3 URL:** Neither `get_episode` nor episode_versions expose a direct MP3 URL field. The public audio is accessed via **feed items**. Two equivalent approaches:
+
+```
+# Via MCP tool (one call)
+list_feed_items episode_id="{episode_uuid}"        →  returns enclosure_url
+
+# Direct URL (no API call needed)
+https://rss.art19.com/episodes/{episode_uuid}.mp3  →  audio/mpeg (80-100+ MB)
+```
+
+The feed_item_id always matches the episode_id for standard episodes. The `enclosure_url` from `list_feed_items` follows the pattern above and can be used before publish when the RSS endpoint isn't yet live.
+
+**Post-publish note:** After publish, `list_media_assets` returns empty. `list_feed_items` is the canonical way to get the public MP3 URL.
 
 ## Philosophy
 

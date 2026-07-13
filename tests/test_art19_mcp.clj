@@ -86,7 +86,7 @@
 
    :marker_points
    [{:id "mp-001" :type "marker_points"
-     :attributes {:position_type 0 :position_type_name "preroll" :start_position nil}}]
+     :attributes {:position_type 0 :position_type_name "preroll" :start_position nil :end_position nil}}]
 
    :feed_items
    [{:id "fi-001" :type "feed_items"
@@ -351,7 +351,8 @@
                                        {:id "mp-new" :type "marker_points"
                                         :attributes {:position_type (get-in body [:data :attributes :position_type])
                                                      :position_type_name "midroll"
-                                                     :start_position (get-in body [:data :attributes :start_position])}}))
+                                                     :start_position (get-in body [:data :attributes :start_position])
+                                                     :end_position (get-in body [:data :attributes :end_position])}}))
         (= method :delete) {:status 204 :headers {} :body ""}
         :else (respond 405 (jsonapi-error 405 "Method not allowed")))
 
@@ -759,7 +760,26 @@
                                   @(:received-requests *fake-api*)))]
       (is (= true (get-in patch-req [:body :data :attributes :published])))
       (is (= "2026-03-01T12:00:00Z"
-             (get-in patch-req [:body :data :attributes :released_at]))))))
+             (get-in patch-req [:body :data :attributes :released_at])))))
+
+  (testing "publish_episode with release_immediately and no released_at auto-sets it"
+    (let [before (inst-ms (java.time.Instant/now))
+          result (tool-result (tool-call! *mcp-url* *session-id* "publish_episode"
+                                          {:episode_id "ep-001"
+                                           :release_immediately true}))
+          after (inst-ms (java.time.Instant/now))
+          patch-req (last (filter #(and (= (:method %) :patch)
+                                        (str/includes? (or (:uri %) "") "episodes"))
+                                  @(:received-requests *fake-api*)))
+          sent-at (get-in patch-req [:body :data :attributes :released_at])
+          sent-ms (inst-ms (java.time.Instant/parse sent-at))]
+      (is (some? result))
+      (is (true? (get-in patch-req [:body :data :attributes :published])))
+      (is (true? (get-in patch-req [:body :data :attributes :release_immediately])))
+      (is (string? sent-at))
+      ;; released_at should be between before and after (approx now)
+      (is (<= before sent-ms after))
+      (is (<= sent-ms after)))))
 
 (deftest test-delete-episode
   (testing "delete_episode sends DELETE and returns deleted ID"
@@ -948,13 +968,25 @@
         (is (contains? mp :default_for))))))
 
 (deftest test-create-marker-point
-  (testing "create_marker_point POSTs position_type and returns new marker"
+  (testing "create_marker_point POSTs position_type and start_position"
     (let [result (tool-result (tool-call! *mcp-url* *session-id* "create_marker_point"
                                           {:episode_version_id "v-001"
                                            :position_type 1
                                            :start_position 300.0}))]
       (is (= "mp-new" (get-in result [:data :id])))
-      (is (= 1 (get-in result [:data :attributes :position_type]))))))
+      (is (= 1 (get-in result [:data :attributes :position_type])))))
+
+  (testing "create_marker_point with end_position for EmbeddedAdPoint"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "create_marker_point"
+                                          {:episode_version_id "v-001"
+                                           :position_type 1
+                                           :start_position 56.113
+                                           :end_position 86.113
+                                           :maximum_content_count 1
+                                           :maximum_content_duration 60
+                                           :type "EmbeddedAdPoint"}))]
+      (is (= "mp-new" (get-in result [:data :id])))
+      (is (= 86.113 (get-in result [:data :attributes :end_position]))))))
 
 (deftest test-delete-marker-point
   (testing "delete_marker_point DELETEs and returns deleted ID"
@@ -969,7 +1001,7 @@
       (is (= "mp-001" (get-in result [:data :id]))))))
 
 (deftest test-update-marker-point
-  (testing "update_marker_point PATCHes marker attributes"
+  (testing "update_marker_point PATCHes start_position"
     (let [result (tool-result (tool-call! *mcp-url* *session-id* "update_marker_point"
                                           {:marker_point_id "mp-001"
                                            :start_position 600.0}))]
@@ -977,7 +1009,19 @@
       (let [patch-req (last (filter #(and (= (:method %) :patch)
                                           (str/includes? (or (:uri %) "") "marker_points"))
                                     @(:received-requests *fake-api*)))]
-        (is (= 600.0 (get-in patch-req [:body :data :attributes :start_position])))))))
+        (is (= 600.0 (get-in patch-req [:body :data :attributes :start_position]))))))
+
+  (testing "update_marker_point PATCHes end_position"
+    (let [patch-req-before (last (filter #(and (= (:method %) :patch)
+                                               (str/includes? (or (:uri %) "") "marker_points"))
+                                         @(:received-requests *fake-api*)))]
+      (tool-result (tool-call! *mcp-url* *session-id* "update_marker_point"
+                               {:marker_point_id "mp-001"
+                                :end_position 120.0}))
+      (let [patch-req (last (filter #(and (= (:method %) :patch)
+                                          (str/includes? (or (:uri %) "") "marker_points"))
+                                    @(:received-requests *fake-api*)))]
+        (is (= 120.0 (get-in patch-req [:body :data :attributes :end_position])))))))
 
 (deftest test-list-marker-point-content-rules
   (testing "list_marker_point_content_rules returns content rules"
@@ -1032,6 +1076,81 @@
       (is (some? (:version_id result)))
       (is (= "submitted" (:processing_status result)))
       (is (= 0 (:markers_added result))))))
+
+(deftest test-prepare-with-midrolls
+  (testing "prepare_episode_version with midrolls generates pre + mid + post template"
+    (reset! (:received-requests *fake-api*) [])
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                                          {:episode_id "ep-001"
+                                           :midrolls [300.0 900.0]}))
+          requests @(:received-requests *fake-api*)
+          ;; Find the POST to episode_versions to check copy_marker_points
+          create-req (first (filter #(and (= (:method %) :post)
+                                          (str/includes? (or (:uri %) "") "episode_versions"))
+                                    requests))]
+      (is (some? (:version_id result)))
+      (is (= "submitted" (:processing_status result)))
+      (is (= 4 (:markers_added result)))
+      (is (= 4 (:content_rules_created result)))
+      (is (false? (get-in create-req [:body :data :attributes :copy_marker_points])))
+      ;; Pre-roll default duration is 90s (changed from 120s per cohost guidance)
+      (let [mp-requests (filter #(and (= (:method %) :post)
+                                      (str/includes? (or (:uri %) "") "marker_points"))
+                                requests)
+            pre-roll-req (first mp-requests)]
+        (is (= 0 (get-in pre-roll-req [:body :data :attributes :position_type])))
+        (is (= 90 (get-in pre-roll-req [:body :data :attributes :maximum_content_duration])))))))
+
+(deftest test-ping-handler
+  (testing "ping returns empty result (keeps mcpc bridge alive)"
+    (let [resp (http/post *mcp-url*
+                          {:headers {"Content-Type" "application/json"
+                                     "Accept" "application/json"
+                                     "Mcp-Session-Id" *session-id*}
+                           :body (json/generate-string
+                                  {:jsonrpc "2.0" :id "ping-1" :method "ping" :params {}})})
+          body (json/parse-string (:body resp) true)]
+      (is (= 200 (:status resp)))
+      (is (= {} (:result body)))
+      (is (nil? (:error body))))))
+
+(deftest test-prepare-with-midrolls-empty
+  (testing "prepare_episode_version with empty midrolls generates only pre + post"
+    (let [result (tool-result (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                                          {:episode_id "ep-001"
+                                           :midrolls []}))]
+      (is (some? (:version_id result)))
+      (is (= 2 (:markers_added result)))
+      (is (= 2 (:content_rules_created result))))))
+
+(deftest test-prepare-with-midrolls-and-markers-errors
+  (testing "prepare_episode_version with both midrolls and markers returns error"
+    (let [resp (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                           {:episode_id "ep-001"
+                            :midrolls [300.0]
+                            :markers [{:start_position 600.0}]})]
+      (is (tool-error? resp)))))
+
+(deftest test-prepare-with-midrolls-duplicate
+  (testing "prepare_episode_version with duplicate midroll timestamps returns error"
+    (let [resp (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                           {:episode_id "ep-001"
+                            :midrolls [300.0 300.0]})]
+      (is (tool-error? resp)))))
+
+(deftest test-prepare-with-midrolls-negative
+  (testing "prepare_episode_version with negative midroll timestamp returns error"
+    (let [resp (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                           {:episode_id "ep-001"
+                            :midrolls [-1]})]
+      (is (tool-error? resp)))))
+
+(deftest test-prepare-with-midrolls-unsorted
+  (testing "prepare_episode_version with unsorted midroll timestamps returns error"
+    (let [resp (tool-call! *mcp-url* *session-id* "prepare_episode_version"
+                           {:episode_id "ep-001"
+                            :midrolls [900.0 300.0]})]
+      (is (tool-error? resp)))))
 
 ;; ─── Tests: Feed Items ───────────────────────────────────────────────────
 
