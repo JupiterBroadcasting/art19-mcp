@@ -25,7 +25,7 @@
 ;; Tune here without hunting through code. Values: seconds (max ad duration)
 ;; and count (max ads per slot). Midroll duration depends on how many midrolls
 ;; exist: a single midroll gets the full duration; 2+ midrolls split capacity.
-(def ^:const default-pre-roll-duration 90)
+(def ^:const default-pre-roll-duration 60)
 (def ^:const default-pre-roll-count 2)
 (def ^:const default-midroll-duration 120) ;; 1 midroll
 (def ^:const default-midroll-multi-duration 90) ;; 2+ midrolls
@@ -1177,7 +1177,7 @@
                   :properties {:episode_id {:type "string" :description "Episode UUID"}
                                :midrolls {:type "array"
                                           :items {:type "number"}
-                                          :description "Midroll timestamps in seconds. Each gets an AdInsertionPoint (position_type=1). Ad slot defaults (all tunable via constants at top of art19_mcp.bb): pre-roll 90s (2 ads), single midroll 120s / 2+ midrolls 90s each (3 ads), post-roll 180s (2 ads). All get Campaign content rules. Mutually exclusive with markers."}
+                                          :description "Midroll timestamps in seconds. Each gets an AdInsertionPoint (position_type=1). Ad slot defaults (all tunable via constants at top of art19_mcp.bb): pre-roll 60s (2 ads), single midroll 120s / 2+ midrolls 90s each (3 ads), post-roll 180s (2 ads). All get Campaign content rules. Mutually exclusive with markers."}
                                :markers {:type "array"
                                          :description "Ad markers to add. Each marker gets a content rule (Campaign for AdInsertionPoint). If markers is omitted AND midrolls is omitted, copies existing markers from active version. Mutually exclusive with midrolls."
                                          :items {:type "object"
