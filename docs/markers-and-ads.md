@@ -151,8 +151,15 @@ Once an episode version reaches `processing_status: "active"`, ART19 **locks its
 
 **Ad slot duration defaults** (all tunable via `def ^:const` at the top of `art19_mcp.bb`):
 
-- Pre-roll: **90s** (2 ads)
+- Pre-roll: **60s** (2 ads)
 - Mid-roll: **single = 120s**, **2+ midrolls = 90s each** (3 ads)
 - Post-roll: **180s** (2 ads)
 
 These apply to new episodes and new-version backfills on the current server code. On a pre-deploy server pass them explicitly.
+
+**Future layout (not yet implemented):** a no-pre-roll variant with an early
+midroll (midroll(s) placed near the start, no position_type=0 marker). The
+`build-marker-set` template currently always emits a pre-roll; supporting a
+pre-roll-optional mode would mean making the pre-roll conditional in
+`build-marker-set` (and the `midrolls` convenience param). Tracked as a planned
+enhancement — use the explicit `markers` param in the meantime if you need it.
