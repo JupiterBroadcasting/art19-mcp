@@ -108,7 +108,7 @@ under the hood — you'll see `active_version_id` change). Our MCP tools cannot
 (`not_eligible_for_changes`). So: use the UI for quick one-off tweaks on already
 live episodes; use the new-version flow above for batch backfills.
 
-## One-Shot (future server — `prepare_episode_version`)
+## One-Shot (`prepare_episode_version`)
 
 ```clojure
 ;; Creates version + pre + midrolls + post + Campaign rules + submits
@@ -124,6 +124,12 @@ prepare_episode_version(episode_id: "…",
                         source_url: "http://host/new.flac",
                         midrolls: [1800, 3600])
 ```
+
+> **GOTCHA: `prepare_episode_version` fails on brand-new episodes** (no active
+> version to copy from). You'll get `422 no_active_version`. For new episodes,
+> use the explicit path above: `create_episode_version` → markers → rules →
+> submit → wait → publish. Only episodes with a published version can use the
+> one-shot path.
 
 ## Critical Rules
 

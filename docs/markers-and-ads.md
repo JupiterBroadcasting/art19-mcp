@@ -74,7 +74,7 @@ Playback: same as uploaded
 
 ## One-Off Workflow with `prepare_episode_version`
 
-For quick episode prep with markers baked in:
+For quick episode prep with markers baked in (requires an existing active version — **won't work on brand-new episodes**):
 
 ```clojure
 prepare_episode_version(
@@ -115,6 +115,7 @@ Do you have one audio file with ads already mixed in?
 - **AdInsertionPoint requires content rules** — a marker without a rule won't serve anything.
 - **You can mix both** on the same version if needed (prerolls embedded, midrolls server-inserted, etc.)
 - **prepare_episode_version with :type EmbeddedAdPoint** — you still need to supply the final mixed audio as `source_url`
+- **prepare_episode_version fails on brand-new episodes** — requires an active version to copy from. New episodes (`active_version_id: null`) hit `422 no_active_version`. Use the explicit path: `create_episode_version` → markers → rules → submit → wait → publish.
 
 ### Marker Ordering Constraints
 
