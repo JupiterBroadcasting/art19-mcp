@@ -170,7 +170,7 @@ cr-attrs (cond-> {:priority cr-priority}
                                        :items {:type "number"}
                                        :description "Midroll timestamps in seconds.
                                          Each gets a midroll AdInsertionPoint. Ad slot defaults (tunable
-                                         via constants at top of art19_mcp.bb): pre-roll 60s, single
+                                         via constants at top of art19_mcp.bb): pre-roll 30s, single
                                          midroll 120s / 2+ midrolls 90s each, post-roll 180s. All get
                                          Campaign content rules. Mutually exclusive with markers param."}
                             :markers {:type "array"
@@ -191,7 +191,7 @@ cr-attrs (cond-> {:priority cr-priority}
 
 | Test name | What it covers | Key assertions |
 |-----------|---------------|----------------|
-| `test-prepare-with-midrolls` | Happy path: `midrolls: [300, 900]` | 4 markers (pre + 2 mid + post); pre 60s, each mid 90s, post 180s; all Campaign; submitted; `copy_marker_points` = false |
+| `test-prepare-with-midrolls` | Happy path: `midrolls: [300, 900]` | 4 markers (pre + 2 mid + post); pre 30s, each mid 90s, post 180s; all Campaign; submitted; `copy_marker_points` = false |
 | `test-prepare-with-midrolls-single` | Single midroll `midrolls: [600]` | 3 markers (pre + 1 mid + post); mid 120s |
 | `test-prepare-with-midrolls-empty` | Edge: `midrolls: []` | Only pre + post created (2 markers), no midrolls |
 | `test-prepare-with-midrolls-and-markers-errors` | Error: both params provided | Returns error about mutual exclusivity |

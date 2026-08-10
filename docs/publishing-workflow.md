@@ -100,7 +100,7 @@ publish_episode(episode_id: "…", released_at: NOW, release_immediately: true)
 list_feed_items(episode_id: "…")
 ```
 
-**Ad slot defaults:** Pre-roll 60s · Midroll single 120s / 2+ midrolls 90s each · Post-roll 180s (all tunable via `def ^:const` at top of `art19_mcp.bb`). New-server backfills get them automatically; old-server (port 3007 pre-deploy) needs explicit `update_marker_point` calls (as in step 3+4).
+**Ad slot defaults:** Pre-roll 30s · Midroll single 120s / 2+ midrolls 90s each · Post-roll 180s (all tunable via `def ^:const` at top of `art19_mcp.bb`). New-server backfills get them automatically; old-server (port 3007 pre-deploy) needs explicit `update_marker_point` calls (as in step 3+4).
 
 **Editing live episodes WITHOUT a new version:** The ART19 web UI *can* edit
 markers on an `active` version (it silently does a version copy + republish
@@ -135,7 +135,7 @@ prepare_episode_version(episode_id: "…",
 
 | Rule | Detail |
 |------|--------|
-| **Ad slot defaults** | Pre-roll 60s (2 ads) / Midroll single 120s, 2+ midrolls 90s each (3 ads) / Post-roll 180s (2 ads). All tunable via `def ^:const` at top of `art19_mcp.bb`. |
+| **Ad slot defaults** | Pre-roll 30s (2 ads) / Midroll single 120s, 2+ midrolls 90s each (3 ads) / Post-roll 180s (2 ads). All tunable via `def ^:const` at top of `art19_mcp.bb`. |
 | **Active versions are locked** | Once an episode_version is `active` (published), its markers can't be edited via API (`not_eligible_for_changes`). To change a published episode's markers/durations, create a NEW version (copy audio + markers) on a draft, edit, then submit + publish. |
 | **FLAC works** | ART19 accepts FLAC despite docs saying MP3/WAV |
 | **released_at required** | Must provide `released_at` even with `release_immediately: true` (tool auto-sets if omitted) |
