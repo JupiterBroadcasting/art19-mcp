@@ -1,0 +1,8 @@
+{:project "art19-mcp",
+ :version "1.0.0",
+ :status :stable,
+ :milestones {:current "Production publishing tool (677-680 live)",
+              :pending []},
+ :branches {:current "main", :main "main"},
+ :checks {:tests :passed, :lint :passed, :health :passed},
+ :last-updated "2026-08-16"}

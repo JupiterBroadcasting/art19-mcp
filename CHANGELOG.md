@@ -6,12 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Added `:ping` handler so bridge keepalives stop returning `-32601`.
+- `wait_for_processing` can exceed the mcpc bridge timeout — documented manual
+  poll loop in session notes.
+- `.art19/state.edn` restored (dropped in repo reorg; still referenced by AGENTS.md).
 - Fixed `list_episodes` 400 Bad Request by adding pagination defaults (page=1, page_size=100).
 - Added validation for `list_episodes` - requires one of series_id, series_slug, or season_id.
 - Include raw ART19 error response in tool error messages for debugging.
 
 ### Changed
 
+- Default pre-roll ad slot duration is now **30s** (was 60s), per cohost guidance.
+- Fixed `docs/publishing-workflow.md` — marker creation examples used
+  `max_content_count`/`max_content_duration` (dropped silently) instead of the
+  real `maximum_content_count`/`maximum_content_duration` arg names.
 - Added structured JSON logging (timestamp, level, message, data) for all tool calls and API requests/responses.
 - Improved ART19 error messages to include error code, parameter, and detail.
 - Updated tool descriptions to emphasize required parameters (list_episodes, get_series, list_seasons).
