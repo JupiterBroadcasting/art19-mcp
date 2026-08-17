@@ -20,7 +20,7 @@ create_episode_version(episode_id: "…", source_url: "http://host/file.flac",
 ;; 4. Markers — MUST create in order: pre → mid → post
 create_marker_point(episode_version_id: "…", position_type: 0,
                      type: "AdInsertionPoint",
-                     max_content_count: 2, max_content_duration: 90)
+                     maximum_content_count: 2, maximum_content_duration: 30)
 ;; → pre-roll marker_id
 
 ;; !!! Pre-roll fix: set start_position=0 before midrolls
@@ -28,12 +28,12 @@ update_marker_point(marker_point_id: "pre-marker", start_position: 0)
 
 create_marker_point(episode_version_id: "…", position_type: 1,
                     start_position: 1608, type: "AdInsertionPoint",
-                    max_content_count: 3, max_content_duration: 120)
+                    maximum_content_count: 3, maximum_content_duration: 120)
 ;; → midroll marker_id
 
 create_marker_point(episode_version_id: "…", position_type: 2,
                     type: "AdInsertionPoint",
-                    max_content_count: 2, max_content_duration: 180)
+                    maximum_content_count: 2, maximum_content_duration: 180)
 ;; → post-roll marker_id
 
 ;; 5. Content rules (one per marker)
@@ -78,16 +78,16 @@ create_episode_version(episode_id: "…",
 list_marker_points(episode_version_id: "…")
 ;; → pre-roll (pos 0), midrolls (pos 1), post-roll (pos 2)
 
-;; 3. Set pre-roll to 60s (NEW DEFAULT — already 60 if server has the
+;; 3. Set pre-roll to 30s (NEW DEFAULT — already 30 if server has the
 ;;    build-marker-set change; on the OLD server pass it explicitly):
 update_marker_point(marker_point_id: "pre-roll",
-                    maximum_content_duration: 60)
+                    maximum_content_duration: 30)
 
 ;; 4. Add a new midroll (keep existing ones — DON'T delete unless replacing).
 ;;    If this makes 2+ midrolls total, use 90s each; a lone midroll is 120s.
 create_marker_point(episode_version_id: "…", position_type: 1,
                     start_position: 1800, type: "AdInsertionPoint",
-                    max_content_count: 3, maximum_content_duration: 90)
+                    maximum_content_count: 3, maximum_content_duration: 90)
 create_marker_point_content_rule(marker_point_id: "new-midroll",
                                  priority: 1, content_type: "Campaign")
 
@@ -101,6 +101,12 @@ list_feed_items(episode_id: "…")
 ```
 
 **Ad slot defaults:** Pre-roll 30s · Midroll single 120s / 2+ midrolls 90s each · Post-roll 180s (all tunable via `def ^:const` at top of `art19_mcp.bb`). New-server backfills get them automatically; old-server (port 3007 pre-deploy) needs explicit `update_marker_point` calls (as in step 3+4).
+
+> **Param discipline:** tool arg names are exact — `create_marker_point` uses
+> `maximum_content_count` (NOT `max_content_count`), `update_episode_version`
+> uses `version_id` (NOT `episode_version_id`). Unknown args are silently
+> dropped, so a wrong name surfaces as a confusing downstream failure (422/405)
+> instead of a visible error.
 
 **Editing live episodes WITHOUT a new version:** The ART19 web UI *can* edit
 markers on an `active` version (it silently does a version copy + republish
