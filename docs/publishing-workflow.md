@@ -2,12 +2,16 @@
 
 ## New Episode
 
+**Title convention:** always `"EP_NUM: Title"` — e.g. `"681: Ain't Nothing But a
+Syncthing"`. The data source (`/tmp/data.json`) provides `episode` and `title`
+separately; the pipeline must prepend `f"{episode}: "`.
+
 ```clojure
 ;; 1. Probe
 get_series(series_slug: "lu")
 list_episodes(series_slug: "lu", sort: "-released_at", page_size: 1)
 
-;; 2. Create episode (draft)
+;; 2. Create episode (draft) — NOTE: title includes episode number prefix
 create_episode(series_slug: "lu", title: "675: Sloppy Agent Roasting",
                description: "…", itunes_type: "full")
 ;; → episode_id: "uuid"
