@@ -2,43 +2,50 @@
 
 ## New Episode
 
-**Title convention:** always `"EP_NUM: Title"` — e.g. `"681: Ain't Nothing But a
-Syncthing"`. The data source (`/tmp/data.json`) provides `episode` and `title`
+**Title convention:** always `"EP_NUM: Title"` — e.g. `"681: Ain't Nothing But a Syncthing"`. The data source (`/tmp/data.json`) provides `episode` and `title`
 separately; the pipeline must prepend `f"{episode}: "`.
+
+**Ad timestamps:** the data source provides timestamps like `"33:52:02"`. Convert
+to seconds for `start_position`: `33*60 + 52 = 2032`. Baked-in ads (nebula) get
+no marker — only dynamic ad breaks do.
 
 ```clojure
 ;; 1. Probe
 get_series(series_slug: "lu")
 list_episodes(series_slug: "lu", sort: "-released_at", page_size: 1)
 
-;; 2. Create episode (draft) — NOTE: title includes episode number prefix
-create_episode(series_slug: "lu", title: "675: Sloppy Agent Roasting",
+;; 2. Create episode (draft) — title MUST include episode number prefix
+create_episode(series_slug: "lu", title: "681: Ain't Nothing But a Syncthing",
                description: "…", itunes_type: "full")
 ;; → episode_id: "uuid"
+;; NOTE: ART19 may renumber episode_number — the API-assigned number may
+;; differ from the data source. Title is what matters for the feed.
 
 ;; 3. Create version (ART19 fetches audio)
 create_episode_version(episode_id: "…", source_url: "http://host/file.flac",
                        status_on_completion: "active")
 ;; → version_id: "uuid"
 
-;; 4. Markers — MUST create in order: pre → mid → post
+;; 4. Markers — create in order: pre → mid(s) → post
+;;    Position types: 0=Pre-Roll, 1=Mid-Roll, 2=Post-Roll
+
+;; Pre-roll: include start_position: 0 directly
 create_marker_point(episode_version_id: "…", position_type: 0,
-                     type: "AdInsertionPoint",
-                     maximum_content_count: 2, maximum_content_duration: 30)
-;; → pre-roll marker_id
+                    start_position: 0, type: "AdInsertionPoint",
+                    maximum_content_count: 2, maximum_content_duration: 30)
 
-;; !!! Pre-roll fix: set start_position=0 before midrolls
-update_marker_point(marker_point_id: "pre-marker", start_position: 0)
-
+;; Midroll(s): convert ad timestamp to seconds
 create_marker_point(episode_version_id: "…", position_type: 1,
-                    start_position: 1608, type: "AdInsertionPoint",
-                    maximum_content_count: 3, maximum_content_duration: 120)
-;; → midroll marker_id
+                    start_position: 2032, type: "AdInsertionPoint",
+                    maximum_content_count: 3, maximum_content_duration: 90)
 
+;; Post-roll: DO NOT pass start_position — omit it entirely.
+;; Passing start_position: 0 with position_type: 2 causes a silent failure
+;; (empty response / JSON parse error). The API returns start_position: null
+;; for post-roll.
 create_marker_point(episode_version_id: "…", position_type: 2,
                     type: "AdInsertionPoint",
                     maximum_content_count: 2, maximum_content_duration: 180)
-;; → post-roll marker_id
 
 ;; 5. Content rules (one per marker)
 create_marker_point_content_rule(marker_point_id: "…", priority: 1,
@@ -48,7 +55,7 @@ create_marker_point_content_rule(marker_point_id: "…", priority: 1,
 update_episode_version(version_id: "…", processing_status: "submitted",
                        status_on_completion: "active")
 
-;; 7. Wait (~4-5 min)
+;; 7. Wait (~4-5 min) — see Processing Stages below
 wait_for_processing(version_id: "…", timeout_seconds: 300,
                     poll_interval_seconds: 10)
 
@@ -106,18 +113,6 @@ list_feed_items(episode_id: "…")
 
 **Ad slot defaults:** Pre-roll 30s · Midroll single 120s / 2+ midrolls 90s each · Post-roll 180s (all tunable via `def ^:const` at top of `art19_mcp.bb`). New-server backfills get them automatically; old-server (port 3007 pre-deploy) needs explicit `update_marker_point` calls (as in step 3+4).
 
-> **Param discipline:** tool arg names are exact — `create_marker_point` uses
-> `maximum_content_count` (NOT `max_content_count`), `update_episode_version`
-> uses `version_id` (NOT `episode_version_id`). Unknown args are silently
-> dropped, so a wrong name surfaces as a confusing downstream failure (422/405)
-> instead of a visible error.
-
-**Editing live episodes WITHOUT a new version:** The ART19 web UI *can* edit
-markers on an `active` version (it silently does a version copy + republish
-under the hood — you'll see `active_version_id` change). Our MCP tools cannot
-(`not_eligible_for_changes`). So: use the UI for quick one-off tweaks on already
-live episodes; use the new-version flow above for batch backfills.
-
 ## One-Shot (`prepare_episode_version`)
 
 ```clojure
@@ -141,14 +136,64 @@ prepare_episode_version(episode_id: "…",
 > submit → wait → publish. Only episodes with a published version can use the
 > one-shot path.
 
+## Processing Stages
+
+ART19 audio processing progresses through these stages (visible via
+`get_episode_version` → `processing_status`):
+
+```
+draft → downloading → segment_list_processing → processing_requested
+     → processing → active
+```
+
+Typical total time: ~4 min for a 60-min FLAC. If a stage stalls beyond 10 min,
+check the source URL is reachable.
+
+## Automation Notes
+
+**mcpc bridge session persistence:** The mcpc bridge (`mcpc connect`) creates a
+stateful MCP session. However, the session ID is lost between separate shell
+invocations — each new `shell` tool call or terminal session gets a fresh
+process. For a reliable pipeline, run all steps in a single script:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd /home/wes/src/art19-mcp
+./bin/mcpc connect http://127.0.0.1:3007/mcp @art19 2>/dev/null
+# ... all mcpc calls in sequence ...
+```
+
+**Fish shell:** if your default shell is fish, wrap bash-specific syntax in
+`bash -c '...'` — fish doesn't support `for i in $(seq ...)` or `&&` chaining.
+
+**Manual poll fallback:** `wait_for_processing` can exceed the mcpc bridge
+timeout on long-running processing. If it hangs, poll manually:
+
+```bash
+./bin/mcpc @art19 --json tools-call get_episode_version \
+  version_id: '"UUID"' 2>/dev/null | \
+  python3 -c "import sys,json; a=json.loads(json.load(sys.stdin)['content'][0]['text'])['data']['attributes']; print(a['processing_status'], a['status'])"
+```
+
 ## Critical Rules
 
 | Rule | Detail |
 |------|--------|
+| **Title format** | Always `"EP_NUM: Title"` — e.g. `"681: Ain't Nothing But a Syncthing"`. Data source provides them separately. |
 | **Ad slot defaults** | Pre-roll 30s (2 ads) / Midroll single 120s, 2+ midrolls 90s each (3 ads) / Post-roll 180s (2 ads). All tunable via `def ^:const` at top of `art19_mcp.bb`. |
+| **Post-roll: no start_position** | Omit `start_position` entirely for position_type 2. Passing `start_position: 0` causes a silent failure. API returns `start_position: null` for post-roll. |
 | **Active versions are locked** | Once an episode_version is `active` (published), its markers can't be edited via API (`not_eligible_for_changes`). To change a published episode's markers/durations, create a NEW version (copy audio + markers) on a draft, edit, then submit + publish. |
+| **Marker creation order** | Create markers in order: pre → mid(s) → post. Out-of-order creation can return 403. |
 | **FLAC works** | ART19 accepts FLAC despite docs saying MP3/WAV |
 | **released_at required** | Must provide `released_at` even with `release_immediately: true` (tool auto-sets if omitted) |
 | **Content rules required** | Without content rules, AdInsertionPoint markers serve no ads |
 | **Verify via feed_items** | After publish, `list_media_assets` returns empty — use `list_feed_items` for enclosure URL |
 | **copy_marker_points** | Use on `create_episode_version` to copy pre + post from existing version |
+| **Param discipline** | Tool arg names are exact — `create_marker_point` uses `maximum_content_count` (NOT `max_content_count`), `update_episode_version` uses `version_id` (NOT `episode_version_id`). Unknown args are silently dropped. |
+
+**Editing live episodes WITHOUT a new version:** The ART19 web UI *can* edit
+markers on an `active` version (it silently does a version copy + republish
+under the hood — you'll see `active_version_id` change). Our MCP tools cannot
+(`not_eligible_for_changes`). So: use the UI for quick one-off tweaks on already
+live episodes; use the new-version flow above for batch backfills.
