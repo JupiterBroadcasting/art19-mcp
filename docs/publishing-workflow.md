@@ -2,8 +2,17 @@
 
 ## New Episode
 
-**Title convention:** always `"EP_NUM: Title"` — e.g. `"681: Ain't Nothing But a Syncthing"`. The data source (`/tmp/data.json`) provides `episode` and `title`
-separately; the pipeline must prepend `f"{episode}: "`.
+**Data source:** EDN at `/tmp/data` — canonical, always fresh. `/tmp/data.json`
+is stale legacy (last current at 682); ignore it. Extract fields with `bb`:
+
+```bash
+EP_NUM=$(bb -e '(print (:episode (clojure.edn/read-string (slurp "/tmp/data"))))')
+TITLE=$(bb -e '(print (:title (clojure.edn/read-string (slurp "/tmp/data"))))')
+DESC=$(bb -e '(print (:description (clojure.edn/read-string (slurp "/tmp/data"))))')
+FULL_TITLE="$EP_NUM: $TITLE"
+```
+
+**Title convention:** always `"EP_NUM: Title"` — e.g. `"683: Website Speedrun"`.
 
 **Ad timestamps:** the data source provides timestamps like `"33:52:02"`. Convert
 to seconds for `start_position`: `33*60 + 52 = 2032`. Baked-in ads (nebula) get
