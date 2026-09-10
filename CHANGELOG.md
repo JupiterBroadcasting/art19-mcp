@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Default pre-roll ad slot is now **180s × 1 ad** (was 30s × 2). Longer
+  host reads must run pre-roll; the slot finally fits them.
 - Default pre-roll ad slot duration is now **30s** (was 60s), per cohost guidance.
 - Fixed `docs/publishing-workflow.md` — marker creation examples used
   `max_content_count`/`max_content_duration` (dropped silently) instead of the

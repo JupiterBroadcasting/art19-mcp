@@ -1104,9 +1104,11 @@
       (is (= 2 (count mid-roll-reqs)))
       (doseq [m mid-roll-reqs]
         (is (= 90 (get-in m [:body :data :attributes :maximum_content_duration]))))
-      ;; Pre-roll default duration is 30s (default-pre-roll-duration)
+      ;; Pre-roll default is a single 180s slot (default-pre-roll-duration/count)
+      ;; — fits longer host reads that must run pre-roll.
       (is (= 0 (get-in pre-roll-req [:body :data :attributes :position_type])))
-      (is (= 30 (get-in pre-roll-req [:body :data :attributes :maximum_content_duration])))
+      (is (= 180 (get-in pre-roll-req [:body :data :attributes :maximum_content_duration])))
+      (is (= 1 (get-in pre-roll-req [:body :data :attributes :maximum_content_count])))
       ;; Post-roll default duration is 180s
       (is (= 2 (get-in post-roll-req [:body :data :attributes :position_type])))
       (is (= 180 (get-in post-roll-req [:body :data :attributes :maximum_content_duration]))))))

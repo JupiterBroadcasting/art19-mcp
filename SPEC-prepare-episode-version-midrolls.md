@@ -170,7 +170,7 @@ cr-attrs (cond-> {:priority cr-priority}
                                        :items {:type "number"}
                                        :description "Midroll timestamps in seconds.
                                          Each gets a midroll AdInsertionPoint. Ad slot defaults (tunable
-                                         via constants at top of art19_mcp.bb): pre-roll 30s, single
+                                         via constants at top of art19_mcp.bb): pre-roll 180s x 1 ad, single
                                          midroll 120s / 2+ midrolls 90s each, post-roll 180s. All get
                                          Campaign content rules. Mutually exclusive with markers param."}
                             :markers {:type "array"

@@ -38,10 +38,10 @@ create_episode_version(episode_id: "…", source_url: "http://host/file.flac",
 ;; 4. Markers — create in order: pre → mid(s) → post
 ;;    Position types: 0=Pre-Roll, 1=Mid-Roll, 2=Post-Roll
 
-;; Pre-roll: include start_position: 0 directly
+;; Pre-roll: single 180s slot (fits longer host reads). Include start_position: 0 directly
 create_marker_point(episode_version_id: "…", position_type: 0,
                     start_position: 0, type: "AdInsertionPoint",
-                    maximum_content_count: 2, maximum_content_duration: 30)
+                    maximum_content_count: 1, maximum_content_duration: 180)
 
 ;; Midroll(s): convert ad timestamp to seconds
 create_marker_point(episode_version_id: "…", position_type: 1,
@@ -98,10 +98,11 @@ create_episode_version(episode_id: "…",
 list_marker_points(episode_version_id: "…")
 ;; → pre-roll (pos 0), midrolls (pos 1), post-roll (pos 2)
 
-;; 3. Set pre-roll to 30s (NEW DEFAULT — already 30 if server has the
-;;    build-marker-set change; on the OLD server pass it explicitly):
+;; 3. Set pre-roll to single 180s slot (current default — already 180/1 if
+;;    server has the pre-roll-180 change; on the OLD server pass it explicitly):
 update_marker_point(marker_point_id: "pre-roll",
-                    maximum_content_duration: 30)
+                    maximum_content_duration: 180,
+                    maximum_content_count: 1)
 
 ;; 4. Add a new midroll (keep existing ones — DON'T delete unless replacing).
 ;;    If this makes 2+ midrolls total, use 90s each; a lone midroll is 120s.
@@ -120,7 +121,7 @@ publish_episode(episode_id: "…", released_at: NOW, release_immediately: true)
 list_feed_items(episode_id: "…")
 ```
 
-**Ad slot defaults:** Pre-roll 30s · Midroll single 120s / 2+ midrolls 90s each · Post-roll 180s (all tunable via `def ^:const` at top of `art19_mcp.bb`). New-server backfills get them automatically; old-server (port 3007 pre-deploy) needs explicit `update_marker_point` calls (as in step 3+4).
+**Ad slot defaults:** Pre-roll 180s × 1 ad · Midroll single 120s / 2+ midrolls 90s each · Post-roll 180s (all tunable via `def ^:const` at top of `art19_mcp.bb`). New-server backfills get them automatically; old-server (port 3007 pre-deploy) needs explicit `update_marker_point` calls (as in step 3+4).
 
 ## One-Shot (`prepare_episode_version`)
 
@@ -190,7 +191,7 @@ timeout on long-running processing. If it hangs, poll manually:
 | Rule | Detail |
 |------|--------|
 | **Title format** | Always `"EP_NUM: Title"` — e.g. `"681: Ain't Nothing But a Syncthing"`. Data source provides them separately. |
-| **Ad slot defaults** | Pre-roll 30s (2 ads) / Midroll single 120s, 2+ midrolls 90s each (3 ads) / Post-roll 180s (2 ads). All tunable via `def ^:const` at top of `art19_mcp.bb`. |
+| **Ad slot defaults** | Pre-roll 180s × 1 ad (fits longer host reads that must run pre-roll) / Midroll single 120s, 2+ midrolls 90s each (3 ads) / Post-roll 180s (2 ads). All tunable via `def ^:const` at top of `art19_mcp.bb`. |
 | **Post-roll: no start_position** | Omit `start_position` entirely for position_type 2. Passing `start_position: 0` causes a silent failure. API returns `start_position: null` for post-roll. |
 | **Active versions are locked** | Once an episode_version is `active` (published), its markers can't be edited via API (`not_eligible_for_changes`). To change a published episode's markers/durations, create a NEW version (copy audio + markers) on a draft, edit, then submit + publish. |
 | **Marker creation order** | Create markers in order: pre → mid(s) → post. Out-of-order creation can return 403. |
