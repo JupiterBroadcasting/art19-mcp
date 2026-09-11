@@ -218,6 +218,8 @@ calls are fast. A cheap warmup is `get_series(series_slug: "lu")`.
 | **Verify via feed_items** | After publish, `list_media_assets` returns empty — use `list_feed_items` for enclosure URL |
 | **copy_marker_points** | Use on `create_episode_version` to copy pre + post from existing version |
 | **Param discipline** | Tool arg names are exact — `create_marker_point` uses `maximum_content_count` (NOT `max_content_count`), `update_episode_version` uses `version_id` (NOT `episode_version_id`). Unknown args are silently dropped. |
+| **Never `release_immediately` on live episodes** | `publish_episode(release_immediately: true)` rewrites `released_at` to now — old episodes resurface as new in feed readers. For retimes/backfills, publish with `released_at` pinned to the original pubDate (past date goes live immediately without rewriting history). Assert `feed_item.released_at == original` after publish. |
+| **Verify content rules after every version copy** | `copy_marker_points` is lossy on rules (~7% observed: 4 of 56 markers across 15 episodes came over ruleless, nondeterministically). A marker without a Campaign rule serves no ads. After any copy-based flow, run `list_marker_point_content_rules` per marker and backfill missing ones (`priority: 1, Campaign`). |
 
 **Editing live episodes WITHOUT a new version:** The ART19 web UI *can* edit
 markers on an `active` version (it silently does a version copy + republish
