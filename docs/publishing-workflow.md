@@ -186,6 +186,23 @@ timeout on long-running processing. If it hangs, poll manually:
   python3 -c "import sys,json; a=json.loads(json.load(sys.stdin)['content'][0]['text'])['data']['attributes']; print(a['processing_status'], a['status'])"
 ```
 
+## Publishing from showfactory
+
+The NixOS service (`services.art19-mcp`, port 3007, systemd-credential auth)
+is the publish path on the showfactory host. Agents there reach it two ways:
+
+- **Hermes → injector (native):** `art19` is wired into the `default` and
+  `chief` profiles' `mcp_servers`. Tools appear in the agent surface with a
+  300s timeout. This is the going-forward path for agent-driven publishes.
+- **Raw curl JSON-RPC (manual/scripted):** no mcpc on showfactory (Node
+  toolchain absent by design). Session lifecycle: `initialize` → capture
+  `Mcp-Session-Id` → `notifications/initialized` → `tools/call` per step.
+  Verified working against the live instance.
+
+**Cold-start latency:** the first API call after deploy/idle can take ~60s+
+(TLS + paginated fetch). Use generous timeouts on first contact; subsequent
+calls are fast. A cheap warmup is `get_series(series_slug: "lu")`.
+
 ## Critical Rules
 
 | Rule | Detail |
