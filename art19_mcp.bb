@@ -38,10 +38,46 @@
     (when (.exists (java.io.File. path))
       (edn/read-string (slurp path)))))
 
+(defn parse-dotenv-file
+  "Parse a KEY=value file (systemd EnvironmentFile format) into a map.
+   Skips blanks and # comments; strips matching single/double quotes."
+  [path]
+  (let [f (java.io.File. path)]
+    (when (.exists f)
+      (into {}
+            (comp (map str/trim)
+                  (remove #(or (str/blank? %)
+                               (str/starts-with? % "#")))
+                  (map #(let [[k & vs] (str/split % #"=" 2)]
+                          [(str/trim k)
+                           (-> (str/join "=" vs) str/trim
+                               (str/replace #"^\"|\"$" "")
+                               (str/replace #"^'|'$" ""))]))
+                  (remove #(str/blank? (first %))))
+            (str/split-lines (slurp f))))))
+
+(defn load-credential-file
+  "Read ART19 credentials from a systemd credential file.
+   With no args, resolves $CREDENTIALS_DIRECTORY/art19.env (set by
+   systemd when the unit uses LoadCredential=art19.env:<path>)."
+  ([]
+   (when-let [dir (System/getenv "CREDENTIALS_DIRECTORY")]
+     (load-credential-file (str dir "/art19.env"))))
+  ([path]
+   (let [vals (parse-dotenv-file path)]
+     (when (seq vals)
+       {:api-token (get vals "ART19_API_TOKEN")
+        :api-credential (get vals "ART19_API_CREDENTIAL")}))))
+
 (defn get-art19-config []
-  (let [file-cfg (load-config-file)]
-    {:api-token (or (System/getenv "ART19_API_TOKEN") (:api-token file-cfg))
-     :api-credential (or (System/getenv "ART19_API_CREDENTIAL") (:api-credential file-cfg))}))
+  (let [file-cfg (load-config-file)
+        cred-cfg (load-credential-file)]
+    {:api-token (or (System/getenv "ART19_API_TOKEN")
+                    (:api-token cred-cfg)
+                    (:api-token file-cfg))
+     :api-credential (or (System/getenv "ART19_API_CREDENTIAL")
+                         (:api-credential cred-cfg)
+                         (:api-credential file-cfg))}))
 
 (defn auth-header [{:keys [api-token api-credential]}]
   (str "Token token=\"" api-token "\", credential=\"" api-credential "\""))

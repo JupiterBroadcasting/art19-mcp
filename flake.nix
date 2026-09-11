@@ -102,12 +102,26 @@
           };
 
           tokenFile = lib.mkOption {
-            type = lib.types.path;
+            type = lib.types.nullOr lib.types.path;
+            default = null;
             description = ''
               Path to a file containing ART19 credentials in the format:
                 ART19_API_TOKEN=your-token
                 ART19_API_CREDENTIAL=your-credential
-              Keep this file outside the Nix store (e.g. /run/secrets/art19).
+              Loaded via systemd EnvironmentFile. Set this or credentialFile.
+            '';
+          };
+
+          credentialFile = lib.mkOption {
+            type = lib.types.nullOr lib.types.path;
+            default = null;
+            description = ''
+              Path to a file containing ART19 credentials (same format as
+              tokenFile). Loaded via systemd LoadCredential and exposed to
+              the service at $CREDENTIALS_DIRECTORY/art19.env. Preferred:
+              credentials never reside in the process environment, and the
+              source file only needs to be readable by root at startup.
+              Set this or tokenFile.
             '';
           };
 
@@ -125,6 +139,12 @@
         };
 
         config = lib.mkIf cfg.enable {
+          assertions = [
+            {
+              assertion = cfg.tokenFile != null || cfg.credentialFile != null;
+              message = "services.art19-mcp: set tokenFile or credentialFile.";
+            }
+          ];
           users.users.${cfg.user} = {
             isSystemUser = true;
             group = cfg.group;
@@ -145,11 +165,18 @@
               Restart = "on-failure";
               RestartSec = "5s";
 
-              # Load token/credential from secrets file
-              EnvironmentFile = cfg.tokenFile;
+              # Load token/credential from secrets file (classic path)
+              EnvironmentFile = lib.mkIf (cfg.tokenFile != null) cfg.tokenFile;
               Environment = [
                 "ART19_MCP_PORT=${toString cfg.port}"
               ];
+
+              # Credential file brokered by systemd (preferred path):
+              # readable by root at startup, exposed read-only at
+              # $CREDENTIALS_DIRECTORY/art19.env, never in the environment.
+              LoadCredential =
+                lib.optional (cfg.credentialFile != null)
+                "art19.env:${cfg.credentialFile}";
 
               # Hardening
               NoNewPrivileges = true;

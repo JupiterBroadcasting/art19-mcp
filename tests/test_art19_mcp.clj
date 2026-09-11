@@ -1597,6 +1597,43 @@
 ;; TODO: find-header direct unit test — the three-way fallback (string key
 ;;   → keyword key → case-insensitive scan) is only tested indirectly.
 
+;; ─── Credential file (systemd LoadCredential) unit tests ────────────────────
+
+(deftest test-parse-dotenv-file
+  (testing "KEY=value parsing: comments, blanks, quoted values"
+    (let [f (java.io.File/createTempFile "art19-env" ".env")]
+      (spit (.getPath f)
+            "# a comment\n\nART19_API_TOKEN=tok-123\nART19_API_CREDENTIAL=\"cred abc\"\nQUOTED='q v'\nEMPTY=\n")
+      (try
+        (let [m (art19-mcp/parse-dotenv-file (.getPath f))]
+          (is (= "tok-123" (get m "ART19_API_TOKEN")))
+          (is (= "cred abc" (get m "ART19_API_CREDENTIAL")))
+          (is (= "q v" (get m "QUOTED")))
+          (is (= "" (get m "EMPTY"))))
+        (finally (.delete f))))))
+
+(deftest test-parse-dotenv-file-missing
+  (testing "missing file returns nil"
+    (is (nil? (art19-mcp/parse-dotenv-file "/nonexistent/art19.env")))))
+
+(deftest test-load-credential-file
+  (testing "explicit path loads token + credential"
+    (let [f (java.io.File/createTempFile "art19-cred" ".env")]
+      (spit (.getPath f) "ART19_API_TOKEN=t\nART19_API_CREDENTIAL=c\n")
+      (try
+        (is (= {:api-token "t" :api-credential "c"}
+               (art19-mcp/load-credential-file (.getPath f))))
+        (finally (.delete f)))))
+  (testing "file without ART19 keys yields nil-valued map entries"
+    (let [f (java.io.File/createTempFile "art19-cred" ".env")]
+      (spit (.getPath f) "OTHER=1\n")
+      (try
+        (is (= {:api-token nil :api-credential nil}
+               (art19-mcp/load-credential-file (.getPath f))))
+        (finally (.delete f)))))
+  (testing "missing file returns nil"
+    (is (nil? (art19-mcp/load-credential-file "/nonexistent/art19.env")))))
+
 ;; ─── Runner ─────────────────────────────────────────────────────────────────
 
 (defn -main [& _args]

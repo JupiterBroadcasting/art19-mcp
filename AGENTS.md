@@ -55,7 +55,7 @@ bb start
 bb health
 ```
 
-Auth via env vars or `~/.config/art19/config.edn`:
+Auth precedence: env vars → systemd credential (`$CREDENTIALS_DIRECTORY/art19.env`, when the unit sets `LoadCredential`) → `~/.config/art19/config.edn`:
 
 ```bash
 export ART19_API_TOKEN="your-token"
@@ -76,7 +76,9 @@ This is managed as a NixOS service.
 services.art19-mcp = {
   enable = true;
   port = 3007;
-  tokenFile = "/run/secrets/art19";  # EnvironmentFile format
+  # Preferred: brokered by systemd, never in the process environment.
+  credentialFile = "/run/secrets/art19";  # KEY=value format
+  # Or: tokenFile = "/run/secrets/art19";  # classic EnvironmentFile path
 };
 ```
 
