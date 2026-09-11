@@ -152,7 +152,7 @@ Once an episode version reaches `processing_status: "active"`, ART19 **locks its
 
 **Ad slot duration defaults** (all tunable via `def ^:const` at the top of `art19_mcp.bb`):
 
-- Pre-roll: **30s** (2 ads)
+- Pre-roll: **180s** (1 ad) — fits longer host reads that must run pre-roll
 - Mid-roll: **single = 120s**, **2+ midrolls = 90s each** (3 ads)
 - Post-roll: **180s** (2 ads)
 

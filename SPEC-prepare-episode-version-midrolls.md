@@ -191,7 +191,7 @@ cr-attrs (cond-> {:priority cr-priority}
 
 | Test name | What it covers | Key assertions |
 |-----------|---------------|----------------|
-| `test-prepare-with-midrolls` | Happy path: `midrolls: [300, 900]` | 4 markers (pre + 2 mid + post); pre 30s, each mid 90s, post 180s; all Campaign; submitted; `copy_marker_points` = false |
+| `test-prepare-with-midrolls` | Happy path: `midrolls: [300, 900]` | 4 markers (pre + 2 mid + post); pre 180s × 1 ad, each mid 90s, post 180s; all Campaign; submitted; `copy_marker_points` = false |
 | `test-prepare-with-midrolls-single` | Single midroll `midrolls: [600]` | 3 markers (pre + 1 mid + post); mid 120s |
 | `test-prepare-with-midrolls-empty` | Edge: `midrolls: []` | Only pre + post created (2 markers), no midrolls |
 | `test-prepare-with-midrolls-and-markers-errors` | Error: both params provided | Returns error about mutual exclusivity |
