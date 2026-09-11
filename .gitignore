@@ -3,3 +3,7 @@ node_modules/
 .lsp/
 .clojure-mcp/
 *.log
+
+# Local ops scratch: per-episode session notes stay on disk,
+# out of the public tree (see AGENTS.md no-origin-IPs rule).
+SESSION-*.md
