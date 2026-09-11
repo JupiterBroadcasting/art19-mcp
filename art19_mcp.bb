@@ -952,7 +952,7 @@
     :inputSchema {:type "object" :properties {:episode_id {:type "string"}} :required ["episode_id"]}}
 
    {:name "publish_episode"
-    :description "Publish an episode. If released_at is provided and is in the future, the episode is marked published but will not appear in the feed until that time. If release_immediately is true or released_at is in the past, it goes live right away."
+    :description "Publish an episode. NEW episodes: release_immediately true goes live right away. LIVE episodes (retime/backfill): NEVER use release_immediately (rewrites released_at to now, resurfacing old eps as new) — instead pass released_at pinned to the original pubDate."
     :inputSchema {:type "object"
                   :properties {:episode_id {:type "string" :description "Episode UUID"}
                                :released_at {:type "string" :description "ISO 8601 datetime to schedule release"}
@@ -1057,7 +1057,7 @@
                   :required []}}
 
    {:name "create_episode_version"
-    :description "Create a new audio version for an episode by providing a source URL. The audio will be fetched and processed by ART19."
+    :description "Create a new audio version for an episode by providing a source URL. The audio will be fetched and processed by ART19. With copy_marker_points: markers copy over but content rules may NOT (verify rules per marker afterwards, backfill missing Campaign rules)."
     :inputSchema {:type "object"
                   :properties {:episode_id {:type "string"}
                                :source_url {:type "string" :description "Public URL to the audio file (MP3/WAV)"}
@@ -1139,7 +1139,7 @@
                   :required []}}
 
    {:name "create_marker_point"
-    :description "Create a chapter or ad insertion marker point on an episode version. position_type: 0=preroll, 1=midroll, 2=postroll."
+    :description "Create a chapter or ad insertion marker point on an episode version. position_type: 0=preroll, 1=midroll, 2=postroll. Create in order pre, mid, post. Post-roll (2) OMITS start_position entirely (passing 0 fails silently). Pre-roll takes start_position 0."
     :inputSchema {:type "object"
                   :properties {:episode_version_id {:type "string"}
                                :position_type {:type "integer" :description "0=preroll, 1=midroll, 2=postroll"}

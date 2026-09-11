@@ -1,5 +1,10 @@
 # Publishing Workflow — Quick Reference
 
+> Companion: the `art19-publishing` skill (loadable condensed version of
+> this doc). Back-catalog audio work (house-read stripping, VTT offsets,
+> Fireside/Art19 GUID handling) lives in the art19-dynamic-ads repo
+> (`docs/art19-publish.md`, `skills/lup-house-read-stripper/SKILL.md`).
+
 ## New Episode
 
 **Data source:** EDN at `/tmp/data` — canonical, always fresh. `/tmp/data.json`
