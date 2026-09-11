@@ -39,6 +39,7 @@ art19-mcp/
   - EDN: `clojure.pprint`
 - **Feature branches** — commit often as snapshots, rewrite history later
 - **Docs up to date** — update before commit
+- **No origin IPs in notes** — session notes use `http://<audio-origin>:<port>/…`, never the real fetch-origin IP (episode/version UUIDs are fine — episode IDs are public via RSS)
 - **Keep bb.edn current** — tasks mirror actual commands
 
 ## Running
