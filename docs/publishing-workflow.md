@@ -249,6 +249,8 @@ calls are fast. A cheap warmup is `get_series(series_slug: "lu")`.
 | **Content rules required** | Without content rules, AdInsertionPoint markers serve no ads |
 | **Verify via feed_items** | After publish, `list_media_assets` returns empty — use `list_feed_items` for enclosure URL |
 | **copy_marker_points** | Use on `create_episode_version` to copy pre + post from existing version |
+| **A FAILED version kills the live episode** | A version submitted with `status_on_completion: "active"` that fails processing still DEACTIVATES the previously-live version. Result: episode stays `published: true` but `active_version_id: null`, zero markers, and the enclosure URL 404s — a silent outage. Happened 2026-10-11 to ep688. **Never experiment on a live episode's version.** Test risky changes on a disposable episode first. Recovery: new version from source + correct markers + publish with pinned pubDate (enclosure URL survives). |
+| **Never marked for cleanup** | Leave probe/draft versions alone until the episode is verified healthy — a failed version can mask the real state. |
 | **Nebula is never marked** | Baked into audio, not ART19-managed inventory. No marker. Other long baked sponsor reads (Hostinger) DO get an `EmbeddedAdPoint`. |
 | **EmbeddedAdPoint needs null position_type** | `position_type: null` is required — any integer returns 422 `code=present` "Position type must be blank". Also needs `end_position`, and takes Campaign content rules like any marker. |
 | **Param discipline** | Tool arg names are exact — `create_marker_point` uses `maximum_content_count` (NOT `max_content_count`), `update_episode_version` uses `version_id` (NOT `episode_version_id`). Unknown args are silently dropped. |
