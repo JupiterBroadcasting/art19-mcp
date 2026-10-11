@@ -962,6 +962,7 @@
         (is (= 0 (:position_type mp)))
         (is (= "preroll" (:position_type_name mp)))
         (is (contains? mp :start_position))
+        (is (contains? mp :end_position))
         (is (contains? mp :maximum_content_count))
         (is (contains? mp :maximum_content_duration))
         (is (contains? mp :type))

@@ -14,3 +14,20 @@ TODO
 - Schema discipline is now documented in `docs/publishing-workflow.md`
   (exact arg names; unknown args are silently dropped). Consider a test that
   asserts tool schemas reject unknown keys to make this a hard failure.
+
+## EmbeddedAdPoint — blocked at ART19 processing
+
+- **Goal:** mark ART19-managed baked reads (Hostinger; NOT nebula — see
+  workflow doc Critical Rules) as `EmbeddedAdPoint` so ART19 can track them.
+- **Working:** `position_type: null` is required (integer -> 422
+  `code=present` "Position type must be blank"); `end_position` persists;
+  Campaign content rules attach normally.
+- **Blocked:** ANY version containing an EmbeddedAdPoint fails ART19
+  processing instantly (`processing_failed`, `validation_errors: null`).
+  Isolation-tested: embedded-only fails, embedded+ad fails, ad-only passes.
+- **Likely missing step** (per ART19 docs): the read's audio must be
+  uploaded under series -> Content -> Advertisements, then attached to a
+  brand line item. We have only done the region annotation.
+- **Next:** Wes uploads the Hostinger read in the ART19 UI, then re-run
+  the 688 retrofit (script staged, idempotent, pubDate-pinned).
+- 688's live version was never affected — the failed draft never published.

@@ -561,6 +561,7 @@
                                :position_type (get-in mp [:attributes :position_type])
                                :position_type_name (get-in mp [:attributes :position_type_name])
                                :start_position (get-in mp [:attributes :start_position])
+                               :end_position (get-in mp [:attributes :end_position])
                                :maximum_content_count (get-in mp [:attributes :maximum_content_count])
                                :maximum_content_duration (get-in mp [:attributes :maximum_content_duration])
                                :type (get-in mp [:attributes :type])

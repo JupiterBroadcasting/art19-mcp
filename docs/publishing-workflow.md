@@ -19,9 +19,36 @@ FULL_TITLE="$EP_NUM: $TITLE"
 
 **Title convention:** always `"EP_NUM: Title"` — e.g. `"683: Website Speedrun"`.
 
-**Ad timestamps:** the data source provides timestamps like `"33:52:02"`. Convert
-to seconds for `start_position`: `33*60 + 52 = 2032`. Baked-in ads (nebula) get
-no marker — only dynamic ad breaks do.
+**Ad timestamps:** the source is `~/Downloads/workdir/Linux Unplugged NNN (Ads) Ads.csv`,
+which lists every ad region. Classify each region:
+
+| Region shape | Meaning | Action |
+|---|---|---|
+| ~1s wide, named `Dynamic N` | dynamic ad break | `AdInsertionPoint` midroll at `start_position` |
+| 30s–120s wide, named `Nebula` | **exception — never mark** | none (see below) |
+| 30s–120s wide, other sponsor name | ART19-managed baked read | `EmbeddedAdPoint` spanning start→end |
+
+**Nebula is never marked.** It's baked into the audio by us/JB, isn't
+ART19-managed inventory, and gets no marker — treat it as invisible. Every
+other long baked sponsor read (Hostinger) gets an `EmbeddedAdPoint` so ART19
+can report and target it.
+
+**`EmbeddedAdPoint` specifics** (verified 2026-10-11 against live API):
+
+```clojure
+;; position_type MUST be null — ART19 rejects any integer with
+;; 422 code=present "Position type must be blank"
+create_marker_point(episode_version_id: "…", position_type: null,
+                    type: "EmbeddedAdPoint",
+                    start_position: 950.23, end_position: 1013.76,
+                    maximum_content_duration: 60, maximum_content_count: 1)
+create_marker_point_content_rule(marker_point_id: "…", priority: 1,
+                                 content_type: "Campaign")  ;; same as AdInsertionPoint
+```
+
+EmbeddedAdPoints accept Campaign content rules, so ART19-managed inventory
+works identically to dynamic breaks. `end_position` is required for this type
+and is verified via `get_marker_point` (and now `list_marker_points`).
 
 ```clojure
 ;; 1. Probe
@@ -222,6 +249,8 @@ calls are fast. A cheap warmup is `get_series(series_slug: "lu")`.
 | **Content rules required** | Without content rules, AdInsertionPoint markers serve no ads |
 | **Verify via feed_items** | After publish, `list_media_assets` returns empty — use `list_feed_items` for enclosure URL |
 | **copy_marker_points** | Use on `create_episode_version` to copy pre + post from existing version |
+| **Nebula is never marked** | Baked into audio, not ART19-managed inventory. No marker. Other long baked sponsor reads (Hostinger) DO get an `EmbeddedAdPoint`. |
+| **EmbeddedAdPoint needs null position_type** | `position_type: null` is required — any integer returns 422 `code=present` "Position type must be blank". Also needs `end_position`, and takes Campaign content rules like any marker. |
 | **Param discipline** | Tool arg names are exact — `create_marker_point` uses `maximum_content_count` (NOT `max_content_count`), `update_episode_version` uses `version_id` (NOT `episode_version_id`). Unknown args are silently dropped. |
 | **Never `release_immediately` on live episodes** | `publish_episode(release_immediately: true)` rewrites `released_at` to now — old episodes resurface as new in feed readers. For retimes/backfills, publish with `released_at` pinned to the original pubDate (past date goes live immediately without rewriting history). Assert `feed_item.released_at == original` after publish. |
 | **Verify content rules after every version copy** | `copy_marker_points` is lossy on rules (~7% observed: 4 of 56 markers across 15 episodes came over ruleless, nondeterministically). A marker without a Campaign rule serves no ads. After any copy-based flow, run `list_marker_point_content_rules` per marker and backfill missing ones (`priority: 1, Campaign`). |
