@@ -33,7 +33,7 @@ ART19-managed inventory, and gets no marker — treat it as invisible. Every
 other long baked sponsor read (Hostinger) gets an `EmbeddedAdPoint` so ART19
 can report and target it.
 
-**`EmbeddedAdPoint` specifics** (verified 2026-10-11 against live API):
+**`EmbeddedAdPoint` specifics** (investigated 2026-10-11/18 against live API):
 
 ```clojure
 ;; position_type MUST be null — ART19 rejects any integer with
@@ -42,13 +42,46 @@ create_marker_point(episode_version_id: "…", position_type: null,
                     type: "EmbeddedAdPoint",
                     start_position: 950.23, end_position: 1013.76,
                     maximum_content_duration: 60, maximum_content_count: 1)
+;; content rule MUST bind the actual advertisement
 create_marker_point_content_rule(marker_point_id: "…", priority: 1,
-                                 content_type: "Campaign")  ;; same as AdInsertionPoint
+                                 content_type: "Advertisement",
+                                 content_id: "<advertisement uuid>",
+                                 content_type_target: "advertisements")
 ```
 
-EmbeddedAdPoints accept Campaign content rules, so ART19-managed inventory
-works identically to dynamic breaks. `end_position` is required for this type
-and is verified via `get_marker_point` (and now `list_marker_points`).
+What we learned by experiment:
+
+| Attempt | content_type | content_id | Outcome |
+|---|---|---|---|
+| Campaign, no binding | `Campaign` | — | `processing_failed` (validation null) |
+| Advertisement, bound | `Advertisement` | `<ad uuid>` | **processes cleanly** ✅ |
+
+**The content binding was the missing piece**, not `position_type: null`
+(which was always required and was correct). Verified end-to-end on a
+scratch episode 2026-10-18: EmbeddedAdPoint at 950.23→1013.76 with an
+`Advertisement`-bound rule processed to completion alongside a normal
+AdInsertionPoint.
+
+Ad UUIDs are discoverable — `GET /advertisements` returns the roster with
+our Series token, so the publisher can match a sponsor read to its
+advertisement automatically. The UI round-trip is no longer required.
+
+`end_position` is required for this type and **is** persisted — verified via
+`get_marker_point`. `list_marker_points` now projects it (it previously
+silently dropped it, making embedded markers unverifiable via list).
+
+**Token scope:** the Series-scoped token can read `/advertisements`,
+`/brands`, `/campaigns` (200) but NOT `/insertion_orders` (403, Ad Ops
+profile only). So we can look up ad UUIDs automatically, but line-item
+scheduling stays manual in the Ad Ops UI — which is fine, since that's
+commercial work, not publishing.
+
+**`source_file_not_accessible`:** a *different* failure from
+`processing_failed`, and unrelated to markers — the `source_url` fetch
+failed. Always read `validation_errors` before concluding a marker type is
+at fault. The audio host ports rotate weekly; a URL that worked last week
+will 404 this week. Processed versions expose a permanent S3 `source_url`
+if you need a stable test source.
 
 ```clojure
 ;; 1. Probe
