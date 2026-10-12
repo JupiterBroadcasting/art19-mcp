@@ -26,7 +26,7 @@ Returns a submitted version with the standard 4-marker template. The agent then 
 
 | Marker | position_type | start_position | max_ads | max_duration_s | content_type |
 |--------|--------------|---------------|---------|---------------|--------------|
-| Pre-Roll | 0 | 0 | 2 | 90 | Campaign |
+| Pre-Roll | 0 | 0 | 1 | 180 | Campaign |
 | Mid-Roll (single) | 1 | from midrolls[] | 3 | 120 | Campaign |
 | Mid-Roll (2+) | 1 | from midrolls[] | 3 | 90 | Campaign |
 | Post-Roll | 2 | (omitted — ART19 auto-assigns end) | 2 | 180 | Campaign |

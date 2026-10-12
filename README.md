@@ -103,152 +103,66 @@ Add to `mcp-servers.edn`:
            "list_credits" "add_credit" "update_credit" "remove_credit"
            "search_people" "get_person" "create_person"
            "list_episode_versions" "create_episode_version"
-           "get_episode_version" "update_episode_version" "delete_episode_version"
+           "get_episode_version" "update_episode_version" "wait_for_processing"
+           "delete_episode_version"
            "get_episode_next_sibling" "get_episode_previous_sibling"
-           "upload_image"
-           "list_media_assets"
-           "list_marker_points" "create_marker_point" "delete_marker_point"
-           "list_feed_items" "get_feed_item" "create_feed_item"
-           "update_feed_item" "delete_feed_item"]}}}
+           "upload_image" "list_media_assets"
+           "list_marker_points" "create_marker_point" "update_marker_point"
+           "get_marker_point" "delete_marker_point"
+           "list_marker_point_content_rules" "create_marker_point_content_rule"
+           "update_marker_point_content_rule" "delete_marker_point_content_rule"
+           "prepare_episode_version"
+           "list_feed_items" "get_feed_item"]}]}}
 ```
 
 ## Tools
 
-### Episodes (6)
+Full list (42). Arg names are exact — unknown args are silently dropped.
 
 | Tool | Description |
 |------|-------------|
-| `list_episodes` | List episodes for a series; filter by status, date, season, search |
-| `get_episode` | Full episode details; optionally include season/series/credits |
-| `create_episode` | Create draft episode; accepts series slug aliases (lu, twib, cr, sh, tl) |
-| `update_episode` | Update metadata, publish status, release time |
-| `delete_episode` | Permanently delete |
-| `publish_episode` | Publish; optionally schedule `released_at` |
-
-### Series & Seasons (4)
-
-| Tool | Description |
-|------|-------------|
-| `list_series` | All series in the account |
-| `get_series` | Series details + seasons; accepts slug aliases |
-| `list_seasons` | Seasons for a series |
-| `get_season` | Season details |
-
-### Credits (4)
-
-| Tool | Description |
-|------|-------------|
-| `list_credits` | Credits for an episode |
-| `add_credit` | Add credit; roles: HostCredit, CoHostCredit, GuestCredit, ProducerCredit, EditorCredit |
-| `update_credit` | Change role on existing credit |
-| `remove_credit` | Remove a credit |
-
-### People (3)
-
-| Tool | Description |
-|------|-------------|
-| `search_people` | Search by name |
-| `get_person` | Person details |
-| `create_person` | Create new person record |
-
-### Episode Versions (5)
-
-| Tool | Description |
-|------|-------------|
-| `list_episode_versions` | Audio versions for an episode |
-| `create_episode_version` | Attach audio via source URL; ART19 fetches and processes it |
-| `get_episode_version` | Version details and processing status |
-| `update_episode_version` | Submit version for processing, set status_on_completion |
+| `list_episodes` | List episodes (needs series_id/series_slug/season_id) |
+| `get_episode` | Full episode detail |
+| `create_episode` | Create draft episode |
+| `update_episode` | Update episode metadata |
+| `delete_episode` | Delete an episode |
+| `publish_episode` | Publish — never `release_immediately` on live eps, pin `released_at` |
+| `list_series` | List series |
+| `get_series` | Series detail |
+| `list_seasons` | List seasons |
+| `get_season` | Season detail |
+| `list_credits` | Episode credits |
+| `add_credit` | Add credit |
+| `update_credit` | Change credit role |
+| `remove_credit` | Remove credit |
+| `search_people` | Search people |
+| `get_person` | Person detail |
+| `create_person` | Create person |
+| `list_episode_versions` | List versions of an episode |
+| `create_episode_version` | New audio version (`copy_active_version` + `copy_marker_points` for backfills) |
+| `get_episode_version` | Version status + `validation_errors` |
 | `delete_episode_version` | Delete a version |
-
-### Episode Siblings (2)
-
-| Tool | Description |
-|------|-------------|
-| `get_episode_next_sibling` | Get the episode released after this one |
-| `get_episode_previous_sibling` | Get the episode released before this one |
-
-### Images (1)
-
-| Tool | Description |
-|------|-------------|
-| `upload_image` | Upload image artwork for series/season/episode |
-
-### Media Assets (1)
-
-| Tool | Description |
-|------|-------------|
-| `list_media_assets` | List media assets for an episode version. NOTE: Returns empty after episode is published - use feed_items instead. |
-
-### Marker Points / Chapters (4)
-
-| Tool | Description |
-|------|-------------|
-| `list_marker_points` | Chapter/ad insertion markers on a version |
-| `create_marker_point` | Add marker: 0=preroll, 1=midroll, 2=postroll |
-| `update_marker_point` | Update marker timing, position type, or ad limits |
-| `delete_marker_point` | Remove a marker |
-
-## Publishing Workflow
-
-### New Episode (Full Pipeline)
-
-```
-probe → create_episode → create_episode_version → markers → rules
-  → submit → wait_for_processing → publish_episode → verify
-```
-
-1. **Probe** — `get_series`, `list_episodes` (verify API access, check last episode)
-1. **Create episode** — `create_episode(series_slug, title, description, itunes_type)`
-1. **Create version** — `create_episode_version(episode_id, source_url, status_on_completion="active")`
-   - `source_url` points to public HTTP server (FLAC works despite docs saying MP3/WAV)
-1. **Markers** — `create_marker_point` × 3 (pre-roll → midroll → post-roll), incremental `position_type` (0→1→2). Ad slot defaults: pre-roll 180s × 1 ad / midroll single 120s, 2+ midrolls 90s each / post-roll 180s (Campaign content rules; all tunable via `def ^:const` at top of `art19_mcp.bb`)
-1. **Content rules** — `create_marker_point_content_rule` × 3, `content_type: "Campaign"`
-1. **Submit** — `update_episode_version(version_id, processing_status="submitted", status_on_completion="active")`
-1. **Wait** — `wait_for_processing(version_id, timeout_seconds=300, poll_interval_seconds=10)`
-1. **Publish** — `publish_episode(episode_id, released_at=NOW, release_immediately=true)`
-1. **Verify** — `list_feed_items(episode_id)` — check `enclosure_url` is live
-
-**One-shot shortcut** (future server): `prepare_episode_version(episode_id, midrolls=[t1, t2])` — creates version, pre-roll + midrolls + post-roll + Campaign rules + submits in one call. Then just `wait_for_processing` + `publish_episode`.
-
-### Backfill: Replace Audio / Add Midroll (new version)
-
-Used when an episode is already live and you want to swap audio, add a midroll,
-or adjust ad slots. ART19 requires a fresh version because markers on an `active`
-version are **locked** (`not_eligible_for_changes`). See `docs/publishing-workflow.md`
-for the full runbook.
-
-```
-create_episode_version (copy_active_version + copy_marker_points) → edit pre-roll → add midrolls → submit → wait → publish
-```
-
-1. **New version** — `create_episode_version(episode_id, copy_active_version=true, copy_marker_points=true, status_on_completion="active")`
-   - `copy_active_version: true` **reuses the existing audio — no re-upload**. Only a reprocess (~4-5 min) + republish.
-   - `copy_marker_points: true` copies the existing markers onto the draft so you only touch what changed.
-1. **Set ad slots to defaults** — pre-roll 180s × 1 ad, midroll(s) 120s (single) / 90s each (2+), post-roll 180s via `update_marker_point(..., maximum_content_duration=…, maximum_content_count=…)` (new defaults; pass explicitly on the pre-deploy server).
-1. **Add midroll** — `create_marker_point(position_type=1, start_position=…)` + `create_marker_point_content_rule(priority=1, content_type="Campaign")`
-1. **Submit / Wait / Publish / Verify** — as in the new-episode flow above.
-
-> **UI vs API:** The ART19 web UI *can* edit markers on a live episode (it silently
-> does a version copy + republish). Our MCP tools cannot — use the new-version flow
-> above for batch backfills; use the UI for one-off tweaks on already-live episodes.
-
-### Marker Ordering Gotchas
-
-- **Incremental position_type required** — create pre-roll (type 0) first, then midroll (type 1), then post-roll (type 2). ART enforces this order.
-- **Pre-roll needs start_position=0** — creating pre-roll without `start_position` blocks midroll creation. After creating pre-roll with null start, update it to `start_position=0` via `update_marker_point`, then create midroll.
-- **Post-roll depends on midroll** — post-roll (type 2) can only be created after at least one midroll (type 1) exists.
-- **Pre-roll and post-roll don't need start_position** per se (ART19 auto-calculates post-roll from audio duration), but pre-roll DOES need one for correct ordering behavior.
-
-### Feed Items (5)
-
-| Tool | Description |
-|------|-------------|
-| `list_feed_items` | List feed items; filter by episode_id, feed_id, series_id |
-| `get_feed_item` | Get a single feed item by ID |
-| `create_feed_item` | Create a new feed item |
-| `update_feed_item` | Update feed item metadata |
-| `delete_feed_item` | Permanently delete a feed item |
+| `wait_for_processing` | Poll a version until processing finishes |
+| `update_episode_version` | Submit a version (`processing_status: submitted`) |
+| `get_episode_next_sibling` | Next episode by release |
+| `get_episode_previous_sibling` | Previous episode by release |
+| `upload_image` | Upload series/season/episode artwork |
+| `list_media_assets` | Audio asset details (empty after publish) |
+| `list_marker_points` | List markers (includes `end_position`) |
+| `create_marker_point` | Add marker — `position_type` 0/1/2; EmbeddedAdPoint uses `null` |
+| `delete_marker_point` | Delete marker |
+| `get_marker_point` | Marker detail |
+| `update_marker_point` | Edit marker (durations, counts, positions) |
+| `list_marker_point_content_rules` | List a marker's rules |
+| `create_marker_point_content_rule` | Add targeting rule — **REQUIRED**, a marker with no rule serves nothing |
+| `update_marker_point_content_rule` | Edit a targeting rule |
+| `delete_marker_point_content_rule` | Delete a targeting rule |
+| `prepare_episode_version` | One-shot: version + markers + rules + submit (**fails on brand-new episodes**) |
+| `list_feed_items` | Feed items — use for the enclosure URL |
+| `get_feed_item` | Feed item detail |
+| `create_feed_item` | Create feed item |
+| `update_feed_item` | Update feed item |
+| `delete_feed_item` | Delete feed item |
 
 ## JB Show Aliases
 

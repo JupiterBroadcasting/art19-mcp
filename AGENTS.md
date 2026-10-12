@@ -42,6 +42,33 @@ art19-mcp/
 - **No origin IPs in notes** — session notes use `http://<audio-origin>:<port>/…`, never the real fetch-origin IP (episode/version UUIDs are fine — episode IDs are public via RSS)
 - **Keep bb.edn current** — tasks mirror actual commands
 
+## Critical operational rules (learned the hard way — read before publishing)
+
+- **A FAILED version kills the live episode.** A version submitted with
+  `status_on_completion: "active"` that fails processing still deactivates the
+  previously-live version. The episode stays `published: true` with
+  `active_version_id: null` and its enclosure URL 404s — a silent outage that
+  took ~13 min to fix on ep688. **Never experiment on a live episode's
+  version.** Test risky marker changes on an unpublished scratch episode
+  (`create_episode`, never `publish_episode`).
+- **Never `release_immediately: true` on a live episode.** It rewrites
+  `released_at` to now, so old episodes resurface as new in feed readers.
+  Pin the original pubDate instead.
+- **Verify content rules after every version copy.** `copy_marker_points`
+  drops rules nondeterministically (~7% observed). A marker with no rule
+  serves no ads.
+- **EmbeddedAdPoint needs `position_type: null` AND a bound advertisement.**
+  Integer `position_type` → 422 "Position type must be blank". A
+  `content_type: "Campaign"` rule with no binding → the whole version
+  `processing_failed`. Correct form: `content_type: "Advertisement"` +
+  `content_id` + `content_type_target: "advertisements"`.
+- **Nebula is never marked.** Baked in, not ART19-managed. Other baked
+  sponsor reads (Hostinger) do get an `EmbeddedAdPoint`.
+- **Ad slot defaults:** pre-roll **180s × 1** · mid single 120s / 2+ mids
+  90s each (3 ads) · post-roll 180s × 2. All Campaign, priority 1.
+
+Full reference: `docs/publishing-workflow.md`.
+
 ## Running
 
 ```bash
@@ -104,91 +131,66 @@ Add to `mcp-servers.edn`:
            "list_credits" "add_credit" "update_credit" "remove_credit"
            "search_people" "get_person" "create_person"
            "list_episode_versions" "create_episode_version"
-           "get_episode_version" "update_episode_version" "delete_episode_version"
+           "get_episode_version" "update_episode_version" "wait_for_processing"
+           "delete_episode_version"
            "get_episode_next_sibling" "get_episode_previous_sibling"
-           "upload_image"
-           "list_marker_points" "create_marker_point" "delete_marker_point"]}}}
+           "upload_image" "list_media_assets"
+           "list_marker_points" "create_marker_point" "update_marker_point"
+           "get_marker_point" "delete_marker_point"
+           "list_marker_point_content_rules" "create_marker_point_content_rule"
+           "update_marker_point_content_rule" "delete_marker_point_content_rule"
+           "prepare_episode_version"
+           "list_feed_items" "get_feed_item"]}]}}
 ```
 
 ## Tools
 
-### Episodes (6)
+Full list (42). Arg names are exact — unknown args are silently dropped.
 
 | Tool | Description |
 |------|-------------|
-| `list_episodes` | List episodes for a series; filter by status, date, season, search |
-| `get_episode` | Full episode details; use list_credits to get credits |
-| `create_episode` | Create draft episode; accepts series slug aliases (lu, twib, cr, sh, tl) |
-| `update_episode` | Update metadata, publish status, release time |
-| `delete_episode` | Permanently delete |
-| `publish_episode` | Publish; optionally schedule release |
-
-### Series & Seasons (4)
-
-| Tool | Description |
-|------|-------------|
-| `list_series` | All series in the account |
-| `get_series` | Series details; use list_seasons for seasons |
-| `list_seasons` | Seasons for a series |
-| `get_season` | Season details |
-
-### Credits (4)
-
-| Tool | Description |
-|------|-------------|
-| `list_credits` | Credits for an episode |
-| `add_credit` | Add credit; roles: HostCredit, CoHostCredit, GuestCredit, ProducerCredit, EditorCredit |
-| `update_credit` | Change role on existing credit |
-| `remove_credit` | Remove a credit |
-
-### People (3)
-
-| Tool | Description |
-|------|-------------|
-| `search_people` | Search by name |
-| `get_person` | Person details |
-| `create_person` | Create new person record |
-
-### Episode Versions (5)
-
-| Tool | Description |
-|------|-------------|
-| `list_episode_versions` | Audio versions for an episode |
-| `create_episode_version` | Attach audio via source URL; ART19 fetches and processes it |
-| `get_episode_version` | Version details and processing status |
-| `update_episode_version` | Submit version for processing (set processing_status: "submitted"), update source_url, or set status_on_completion |
+| `list_episodes` | List episodes (needs series_id/series_slug/season_id) |
+| `get_episode` | Full episode detail |
+| `create_episode` | Create draft episode |
+| `update_episode` | Update episode metadata |
+| `delete_episode` | Delete an episode |
+| `publish_episode` | Publish — never `release_immediately` on live eps, pin `released_at` |
+| `list_series` | List series |
+| `get_series` | Series detail |
+| `list_seasons` | List seasons |
+| `get_season` | Season detail |
+| `list_credits` | Episode credits |
+| `add_credit` | Add credit |
+| `update_credit` | Change credit role |
+| `remove_credit` | Remove credit |
+| `search_people` | Search people |
+| `get_person` | Person detail |
+| `create_person` | Create person |
+| `list_episode_versions` | List versions of an episode |
+| `create_episode_version` | New audio version (`copy_active_version` + `copy_marker_points` for backfills) |
+| `get_episode_version` | Version status + `validation_errors` |
 | `delete_episode_version` | Delete a version |
-
-### Episode Siblings (2)
-
-| Tool | Description |
-|------|-------------|
-| `get_episode_next_sibling` | Get the episode released after this one |
-| `get_episode_previous_sibling` | Get the episode released before this one |
-
-### Images (1)
-
-| Tool | Description |
-|------|-------------|
-| `upload_image` | Upload image artwork for series/season/episode |
-
-### Marker Points / Chapters (3)
-
-| Tool | Description |
-|------|-------------|
-| `list_marker_points` | Chapter/ad insertion markers on a version |
-| `create_marker_point` | Add marker: 0=preroll, 1=midroll, 2=postroll |
-| `delete_marker_point` | Remove a marker |
-
-### Feed Items (5)
-
-| Tool | Description |
-|------|-------------|
-| `list_feed_items` | List feed items; filter by episode_id, feed_id, series_id, itunes_type, published, q, released_after/before |
-| `get_feed_item` | Get a single feed item by ID |
-| `create_feed_item` | Create a new feed item (requires series_id or feed_id) |
-| `update_feed_item` | Update feed item metadata (title, description, published, etc.) |
-| `delete_feed_item` | Permanently delete a feed item |
+| `wait_for_processing` | Poll a version until processing finishes |
+| `update_episode_version` | Submit a version (`processing_status: submitted`) |
+| `get_episode_next_sibling` | Next episode by release |
+| `get_episode_previous_sibling` | Previous episode by release |
+| `upload_image` | Upload series/season/episode artwork |
+| `list_media_assets` | Audio asset details (empty after publish) |
+| `list_marker_points` | List markers (includes `end_position`) |
+| `create_marker_point` | Add marker — `position_type` 0/1/2; EmbeddedAdPoint uses `null` |
+| `delete_marker_point` | Delete marker |
+| `get_marker_point` | Marker detail |
+| `update_marker_point` | Edit marker (durations, counts, positions) |
+| `list_marker_point_content_rules` | List a marker's rules |
+| `create_marker_point_content_rule` | Add targeting rule — **REQUIRED**, a marker with no rule serves nothing |
+| `update_marker_point_content_rule` | Edit a targeting rule |
+| `delete_marker_point_content_rule` | Delete a targeting rule |
+| `prepare_episode_version` | One-shot: version + markers + rules + submit (**fails on brand-new episodes**) |
+| `list_feed_items` | Feed items — use for the enclosure URL |
+| `get_feed_item` | Feed item detail |
+| `create_feed_item` | Create feed item |
+| `update_feed_item` | Update feed item |
+| `delete_feed_item` | Delete feed item |
 
 ## JB Show Aliases
 

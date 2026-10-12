@@ -111,9 +111,20 @@ Do you have one audio file with ads already mixed in?
 
 ## Gotchas
 
-- **EmbeddedAdPoint has no content rules** — no targeting, no server injection. The audio IS the final product.
+- **EmbeddedAdPoint requires a bound advertisement rule** — `position_type` must be
+  `null` and the content rule must bind a real `LiveReadAd`:
+  `content_type: "Advertisement"` + `content_id` + `content_type_target: "advertisements"`.
+  A rule of `content_type: "Campaign"` with no binding makes the whole version
+  `processing_failed` (verified 2026-10-18 — this cost an outage once).
 - **AdInsertionPoint requires content rules** — a marker without a rule won't serve anything.
-- **You can mix both** on the same version if needed (prerolls embedded, midrolls server-inserted, etc.)
+- **You can mix both** on the same version (embedded sponsor reads + dynamic midrolls)
+  — verified working.
+- **Nebula is never marked** — baked in, not ART19-managed inventory. See
+  `publishing-workflow.md` for the region-classification table.
+- **A FAILED version kills the live episode** — a version submitted with
+  `status_on_completion: "active"` that fails processing still deactivates the live
+  one; the episode stays `published: true` with `active_version_id: null` and the
+  enclosure 404s. Test risky marker changes on an unpublished scratch episode.
 - **prepare_episode_version with :type EmbeddedAdPoint** — you still need to supply the final mixed audio as `source_url`
 - **prepare_episode_version fails on brand-new episodes** — requires an active version to copy from. New episodes (`active_version_id: null`) hit `422 no_active_version`. Use the explicit path: `create_episode_version` → markers → rules → submit → wait → publish.
 

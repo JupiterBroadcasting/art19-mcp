@@ -1,37 +1,5 @@
 TODO
 
-## Done — shipped in code but never cleared here
-
-- ~~create_marker_point / update_marker_point: end_position param~~ — in deployed
-  server (EmbeddedAdPoint markers work).
-- ~~MCP ping handler~~ — `:ping` returns `{}` in dispatch-rpc (deployed).
-
-## Future
-
-- After creating an auditorium/nebula ad marker (EmbeddedAdPoint),
-  decide how inventory is managed for that spot (content rules? manual
-  insertion?).
-- Schema discipline is now documented in `docs/publishing-workflow.md`
-  (exact arg names; unknown args are silently dropped). Consider a test that
-  asserts tool schemas reject unknown keys to make this a hard failure.
-
-## EmbeddedAdPoint — blocked at ART19 processing
-
-- **Goal:** mark ART19-managed baked reads (Hostinger; NOT nebula — see
-  workflow doc Critical Rules) as `EmbeddedAdPoint` so ART19 can track them.
-- **Working:** `position_type: null` is required (integer -> 422
-  `code=present` "Position type must be blank"); `end_position` persists;
-  Campaign content rules attach normally.
-- **Blocked:** ANY version containing an EmbeddedAdPoint fails ART19
-  processing instantly (`processing_failed`, `validation_errors: null`).
-  Isolation-tested: embedded-only fails, embedded+ad fails, ad-only passes.
-- **Likely missing step** (per ART19 docs): the read's audio must be
-  uploaded under series -> Content -> Advertisements, then attached to a
-  brand line item. We have only done the region annotation.
-- **Next:** Wes uploads the Hostinger read in the ART19 UI, then re-run
-  the 688 retrofit (script staged, idempotent, pubDate-pinned).
-- 688's live version was never affected — the failed draft never published.
-
 ## LiveReadAd upload (per read, not per episode)
 
 - EmbeddedAdPoint markers need a bound `LiveReadAd` advertisement, and a
@@ -48,3 +16,22 @@ TODO
 - Publisher auto-matches CSV region name -> LiveReadAd title by substring,
   falls back to "only unused live read" if unambiguous, and refuses to
   create an unbound marker (that fails processing).
+
+## Housekeeping
+
+- `ART19-MCP-Enhancement-SPEC.md` — unimplemented spec for `episode_number` +
+  `media_rating`; neither field exists in `art19_mcp.bb`. Implement or delete.
+- `.art19/state.edn` — stale (claims 677-680, checks from August). Refresh.
+- `DEVLOG.md` — untouched since 2026-02-24.
+- `bb lint` only covers `art19_mcp.bb`; `tests/` has 5 latent clj-kondo
+  warnings (1 unresolved namespace + unused bindings). Extend the lint task.
+- `backup-feat/mvp-before-reorg-20260224-221022` — 18 commits diverged from
+  main. Intentional backup, but nothing in the repo says so.
+- `feat/dev-docs-integration` — fully contained in main; safe to delete.
+
+## Security (needs Wes's decision)
+
+- The audio-origin IP is still present in **git history** (commits `cf36dcd`,
+  `f4557314`, `2b89465b`) and the GitHub repo is **public**. Redacted at HEAD
+  only. Fixing needs a history rewrite + force-push, plus a decision about
+  access to the audio origin itself. NOT done — force-push is Wes's call.

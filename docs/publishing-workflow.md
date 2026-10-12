@@ -2,8 +2,9 @@
 
 > Companion: the `art19-publishing` skill (loadable condensed version of
 > this doc). Back-catalog audio work (house-read stripping, VTT offsets,
-> Fireside/Art19 GUID handling) lives in the art19-dynamic-ads repo
-> (`docs/art19-publish.md`, `skills/lup-house-read-stripper/SKILL.md`).
+> Fireside/Art19 GUID handling) lives in the **art19-dynamic-ads** repo —
+> `docs/art19-publish.md` and `skills/lup-house-read-stripper/SKILL.md`
+> in *that* repo, not this one.
 
 ## New Episode
 
@@ -309,7 +310,8 @@ calls are fast. A cheap warmup is `get_series(series_slug: "lu")`.
 | **A FAILED version kills the live episode** | A version submitted with `status_on_completion: "active"` that fails processing still DEACTIVATES the previously-live version. Result: episode stays `published: true` but `active_version_id: null`, zero markers, and the enclosure URL 404s — a silent outage. Happened 2026-10-11 to ep688. **Never experiment on a live episode's version.** Test risky changes on a disposable episode first. Recovery: new version from source + correct markers + publish with pinned pubDate (enclosure URL survives). |
 | **Never marked for cleanup** | Leave probe/draft versions alone until the episode is verified healthy — a failed version can mask the real state. |
 | **Nebula is never marked** | Baked into audio, not ART19-managed inventory. No marker. Other long baked sponsor reads (Hostinger) DO get an `EmbeddedAdPoint`. |
-| **EmbeddedAdPoint needs null position_type** | `position_type: null` is required — any integer returns 422 `code=present` "Position type must be blank". Also needs `end_position`, and takes Campaign content rules like any marker. |
+| **EmbeddedAdPoint needs null position_type AND a bound advertisement** | `position_type: null` is required (integer → 422 `code=present` "Position type must be blank"), plus `end_position`. Its content rule must bind a real live read — `content_type: "Advertisement"` + `content_id` + `content_type_target: "advertisements"`. A `Campaign` rule with no binding makes the whole version `processing_failed`. |
+| **prepare_episode_version fails on new episodes** | Requires an active version to copy from; brand-new episodes get `422 no_active_version`. Use the explicit path for new episodes. |
 | **Param discipline** | Tool arg names are exact — `create_marker_point` uses `maximum_content_count` (NOT `max_content_count`), `update_episode_version` uses `version_id` (NOT `episode_version_id`). Unknown args are silently dropped. |
 | **Never `release_immediately` on live episodes** | `publish_episode(release_immediately: true)` rewrites `released_at` to now — old episodes resurface as new in feed readers. For retimes/backfills, publish with `released_at` pinned to the original pubDate (past date goes live immediately without rewriting history). Assert `feed_item.released_at == original` after publish. |
 | **Verify content rules after every version copy** | `copy_marker_points` is lossy on rules (~7% observed: 4 of 56 markers across 15 episodes came over ruleless, nondeterministically). A marker without a Campaign rule serves no ads. After any copy-based flow, run `list_marker_point_content_rules` per marker and backfill missing ones (`priority: 1, Campaign`). |
