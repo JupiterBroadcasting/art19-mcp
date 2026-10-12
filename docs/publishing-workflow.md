@@ -76,6 +76,30 @@ profile only). So we can look up ad UUIDs automatically, but line-item
 scheduling stays manual in the Ad Ops UI — which is fine, since that's
 commercial work, not publishing.
 
+**Finding the advertisement to bind** (the bits that will bite you):
+
+- The name field is **`title`**, not `name`. Matching on `name` silently
+  returns nothing — every record looks unnamed.
+- `/advertisements` returns **100 per page** and the roster is ~270 records.
+  You must paginate or you'll miss the live read.
+- Only records with **`type: "LiveReadAd"`** are bindable to embedded
+  markers. `TraditionalAd` records are dynamically-inserted spots and are
+  not valid targets.
+- Titles are episode-qualified, e.g. `"688: Eyes on Deck Hostinger Live Read"` — the sponsor word is embedded in the string, so match by
+  substring in either direction, not equality.
+- **`media_present: false` means the record has no audio uploaded** — such a
+  record can't be bound meaningfully. (`JAXOB` is one; it was never filled
+  in.)
+
+**What "uploaded once" means:** a live read has two halves in ART19 — the
+marker that says *where* the read sits in the audio, and an advertisement
+record that holds the read's *audio file* plus its identity. Each episode
+needs its own marker, but the advertisement is a per-read creative: one
+upload in series → Content → Advertisements (type: Live Read), reused by
+every episode carrying that same read. If the sponsor records a fresh
+read — different wording, different length — that's a new creative and
+needs its own upload.
+
 **`source_file_not_accessible`:** a *different* failure from
 `processing_failed`, and unrelated to markers — the `source_url` fetch
 failed. Always read `validation_errors` before concluding a marker type is

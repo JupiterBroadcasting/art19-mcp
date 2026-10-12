@@ -31,3 +31,20 @@ TODO
 - **Next:** Wes uploads the Hostinger read in the ART19 UI, then re-run
   the 688 retrofit (script staged, idempotent, pubDate-pinned).
 - 688's live version was never affected — the failed draft never published.
+
+## LiveReadAd upload (per read, not per episode)
+
+- EmbeddedAdPoint markers need a bound `LiveReadAd` advertisement, and a
+  live read has two halves: the marker (per episode) + the advertisement
+  record (per distinct read audio).
+- **One upload per distinct read**, reused across episodes carrying it.
+  A re-recorded read (new wording/length) = a new creative = new upload.
+- Only `type: LiveReadAd` records are bindable; `TraditionalAd` are spots.
+- `media_present: false` = record exists but has no audio. Currently
+  `JAXOB` is such an empty record.
+- Upload path: series -> Content -> Advertisements -> Live Read. Needs
+  Brand + Line Item (Ad Ops profile, 403 via our token) for impression
+  tracking — that part stays manual, which is correct: it's commercial.
+- Publisher auto-matches CSV region name -> LiveReadAd title by substring,
+  falls back to "only unused live read" if unambiguous, and refuses to
+  create an unbound marker (that fails processing).
