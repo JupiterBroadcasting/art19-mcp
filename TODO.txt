@@ -30,8 +30,3 @@ TODO
 - `feat/dev-docs-integration` — fully contained in main; safe to delete.
 
 ## Security (needs Wes's decision)
-
-- The audio-origin IP is still present in **git history** (commits `cf36dcd`,
-  `f4557314`, `2b89465b`) and the GitHub repo is **public**. Redacted at HEAD
-  only. Fixing needs a history rewrite + force-push, plus a decision about
-  access to the audio origin itself. NOT done — force-push is Wes's call.

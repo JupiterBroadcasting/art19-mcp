@@ -293,6 +293,34 @@ is the publish path on the showfactory host. Agents there reach it two ways:
 (TLS + paginated fetch). Use generous timeouts on first contact; subsequent
 calls are fast. A cheap warmup is `get_series(series_slug: "lu")`.
 
+## Publisher: human-in-the-loop by design
+
+`publish-lup.py` (on showfactory) reads the Ads CSV and builds a plan, but it
+**never decides on its own**:
+
+- `--dry-run` prints the plan and writes nothing
+- `--confirm` publishes the plan exactly as printed
+- interactive: asks before writing
+
+Marking decisions live in one explicit `POLICY` dict:
+
+| Sponsor | Action | Why |
+|---|---|---|
+| `nebula` | `skip` | baked in, not ART19 inventory (documented exception) |
+| `hostinger` | `embedded` | ART19-managed read → bound EmbeddedAdPoint |
+
+**A sponsor not in POLICY aborts the run** with the question spelled out —
+it will not guess "skip" or "embedded". Same for a baked read with no
+LiveReadAd to bind, or an ambiguous match. Narrow regions (≤5s) are
+break points and always become midrolls; only wide/read-shaped regions
+need a policy entry.
+
+Adding a sponsor is a one-line edit after Wes decides:
+
+```python
+POLICY = {"nebula": "skip", "hostinger": "embedded", "bet365": "embedded"}
+```
+
 ## Critical Rules
 
 | Rule | Detail |
