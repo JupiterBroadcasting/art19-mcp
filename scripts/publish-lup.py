@@ -261,6 +261,16 @@ def build_plan(rows, livereads):
                     f"  '{name}' matched {ad_title!r} but that record has NO AUDIO "
                     f"(media_present: false). Upload the read under series -> Content -> "
                     f"Advertisements before publishing.")
+            # Guard against binding a read that names a DIFFERENT episode.
+            # Titles like "688: Eyes on Deck Hostinger Live Read" are last
+            # week's creative; serving it is silent-wrong-audio.
+            m_ep = re.match(r"^\s*(\d{2,4})\s*:", ad_title or "")
+            if m_ep and m_ep.group(1) != str(EPISODE):
+                questions.append(
+                    f"  '{name}' matched {ad_title!r}, which names episode "
+                    f"{m_ep.group(1)} — but we're publishing {EPISODE}. Verify the ad's "
+                    f"audio duration matches this region ({r['start']:.2f}-{r['end']:.2f}s "
+                    f"= {r['width']:.2f}s) before publishing, or upload this week's read.")
         else:
             reason, detail = ad_title, how
             plan.append({**r, "action": "UNRESOLVED",
