@@ -137,18 +137,33 @@ def read_regions(path):
 
 
 def list_livereads():
-    """Only LiveReadAd records are bindable to EmbeddedAdPoints."""
-    out, page = [], 1
-    while page <= 30:
-        d = api_get("/advertisements", {"page[number]": page, "page[size]": 100})
-        rows = (d or {}).get("data") or []
-        if not rows:
-            break
-        out.extend(rows)
-        if not ((d or {}).get("links") or {}).get("next"):
-            break
-        page += 1
-    return [a for a in out if a.get("attributes", {}).get("type") == "LiveReadAd"]
+    """All LiveReadAd advertisements — the only records an EmbeddedAdPoint can
+    bind to.
+
+    Two API quirks worth knowing (verified 2026-11-01):
+      - the filter param is `type=LiveReadAd`, NOT `filter[type]=…` (the
+        JSON:API-style form is silently ignored and returns all 282 records)
+      - `include=` is likewise ignored; relationships come on the record
+      - the field is `title`, not `name`
+    """
+    d = api_get("/advertisements", {"type": "LiveReadAd"})
+    rows = (d or {}).get("data") or []
+    # Belt and braces: if the server ever stops honouring ?type=, fall back to
+    # scanning the full roster rather than silently returning nothing.
+    if not rows or any(r.get("attributes", {}).get("type") != "LiveReadAd" for r in rows):
+        rows = []
+        page = 1
+        while page <= 30:
+            d = api_get("/advertisements", {"page[number]": page, "page[size]": 100})
+            batch = (d or {}).get("data") or []
+            if not batch:
+                break
+            rows.extend(batch)
+            if not ((d or {}).get("links") or {}).get("next"):
+                break
+            page += 1
+        rows = [r for r in rows if r.get("attributes", {}).get("type") == "LiveReadAd"]
+    return rows
 
 
 def norm(s):
