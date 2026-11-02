@@ -321,6 +321,35 @@ Adding a sponsor is a one-line edit after Wes decides:
 POLICY = {"nebula": "skip", "hostinger": "embedded", "bet365": "embedded"}
 ```
 
+## The `/tmp/data` handoff payload
+
+`/tmp/data` is the EDN handoff file between the Fireside-side agent and this
+publisher. It is shaped for the publisher — if it arrives as JSON summary, it
+was shaped for the wrong consumer and needs re-emitting.
+
+**Top level:** `:guid :title :description :tags :links :links-members :sponsors :guests :episode :show :doc :lup-guid :adfree-guid :chapters :audio :published`
+
+**`:sponsors`** now carries identity, not just display copy:
+
+| Field | Use |
+|---|---|
+| `:name` | matches the Ads CSV region name — the join key |
+| `:timecode` | cross-checks the CSV (e.g. `"17m 35s"` ↔ 1055s) |
+| `:live-message` | the read's script |
+| `:blurb` `:code` `:url` | display copy |
+| `:campaign-id` `:sponsor-id` `:campaign-numeric-id` | **internal IDs — NOT ART19 UUIDs** (they 404 against the ART19 API). Do not try to use them as advertisement/campaign lookups. |
+
+**`:audio`** gates publishing:
+
+```clojure
+{:lup    {:status :verified :chapters 7 :passes 2 :mp3 "…" :size 76795633}
+ :adfree {:status :verified …}}
+```
+
+Only `:lup` matters for ART19 — the adfree render is for other platforms.
+Wait for `:lup :status` to be `:verified`; `:uploading` means the source URL
+is still mid-write and ART19's fetch will fail.
+
 ## Critical Rules
 
 | Rule | Detail |
@@ -338,6 +367,9 @@ POLICY = {"nebula": "skip", "hostinger": "embedded", "bet365": "embedded"}
 | **A FAILED version kills the live episode** | A version submitted with `status_on_completion: "active"` that fails processing still DEACTIVATES the previously-live version. Result: episode stays `published: true` but `active_version_id: null`, zero markers, and the enclosure URL 404s — a silent outage. Happened 2026-10-11 to ep688. **Never experiment on a live episode's version.** Test risky changes on a disposable episode first. Recovery: new version from source + correct markers + publish with pinned pubDate (enclosure URL survives). |
 | **Never marked for cleanup** | Leave probe/draft versions alone until the episode is verified healthy — a failed version can mask the real state. |
 | **Nebula is never marked** | Baked into audio, not ART19-managed inventory. No marker. Other long baked sponsor reads (Hostinger) DO get an `EmbeddedAdPoint`. |
+| **Never skip a sponsor read** | Nebula is the *only* exception. Every other baked sponsor read MUST get an `EmbeddedAdPoint` — if it can't be bound to an advertisement, the publisher ABORTS rather than publishing without it. Skipping is a correctness failure, not a convenience. |
+| **Match ads by newest + title-prefix, never first substring** | Sponsors reuse names weekly ("Hostinger"). A naive first-substring match binds this week's read to last week's ad and silently serves the wrong audio (hit on ep691: matched 688's 63.5s read instead of "Hostinger 11/1 Ad" at 72.48s). Ranking: has-audio → title-starts-with-sponsor-name → newest `created_at`. Regression test: `tests/test_matcher.py`. |
+| **Ad Ops data is out of reach** | The Series token reads `/advertisements`, `/brands`, `/campaigns` but gets 403 on `/insertion_orders` and everything under it. So we can confirm an ad's *campaign* binding but NOT whether a **line item** exists. Per Jeff's rule an embedded ad without a line item plays ART19-only and doesn't carry to Spotify/Apple — that last check needs a human glance in the Ad Ops UI. |
 | **EmbeddedAdPoint needs null position_type AND a bound advertisement** | `position_type: null` is required (integer → 422 `code=present` "Position type must be blank"), plus `end_position`. Its content rule must bind a real live read — `content_type: "Advertisement"` + `content_id` + `content_type_target: "advertisements"`. A `Campaign` rule with no binding makes the whole version `processing_failed`. |
 | **prepare_episode_version fails on new episodes** | Requires an active version to copy from; brand-new episodes get `422 no_active_version`. Use the explicit path for new episodes. |
 | **Param discipline** | Tool arg names are exact — `create_marker_point` uses `maximum_content_count` (NOT `max_content_count`), `update_episode_version` uses `version_id` (NOT `episode_version_id`). Unknown args are silently dropped. |

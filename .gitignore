@@ -7,3 +7,7 @@ node_modules/
 # Local ops scratch: per-episode session notes stay on disk,
 # out of the public tree (see AGENTS.md no-origin-IPs rule).
 SESSION-*.md
+
+# Python bytecode (scripts/publish-lup.py is imported by tests)
+__pycache__/
+*.pyc
