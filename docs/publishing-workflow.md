@@ -101,6 +101,29 @@ every episode carrying that same read. If the sponsor records a fresh
 read — different wording, different length — that's a new creative and
 needs its own upload.
 
+**Ad creative upload cannot be automated.** Verified 2026-11-01 against
+ART19's own OpenAPI specs (`/swagger_json/{external,internal,ad_ops}/content.json`):
+`/advertisements` appears in none of them, `/media_assets` is GET-only in all
+three, and `advertisement_versions` is in no spec and 405s on every write
+verb. `/advertisements` is an undocumented legacy controller — it answers, and
+`POST` returns 422 rather than 405, but an ad created there lands
+`media_present: false`, the unbindable shape. Ad creatives are CMS-only; that
+work happens outside this tooling. See `docs/ad-upload-recon.md`.
+
+**Confirming a live read is properly trafficked** (what "good" looks like,
+from the ART19 ad page):
+
+| Field | Ep691 example |
+|---|---|
+| Type | `LIVE READ` |
+| Ad Ops | `True Native Media` (matches the campaign's `ad_rep_account`) |
+| Brand | `Hostinger` |
+| Line Item | `Hostinger (11/1 - Faked In) - Linux Unplugged` |
+
+"Faked In" in the line-item name is the documented pattern for targeting a
+single episode so a dynamic ad behaves like a baked-in one. No line item ⇒
+ART19-only playback, no Spotify/Apple.
+
 **`source_file_not_accessible`:** a *different* failure from
 `processing_failed`, and unrelated to markers — the `source_url` fetch
 failed. Always read `validation_errors` before concluding a marker type is
@@ -370,6 +393,7 @@ is still mid-write and ART19's fetch will fail.
 | **Never skip a sponsor read** | Nebula is the *only* exception. Every other baked sponsor read MUST get an `EmbeddedAdPoint` — if it can't be bound to an advertisement, the publisher ABORTS rather than publishing without it. Skipping is a correctness failure, not a convenience. |
 | **Match ads by newest + title-prefix, never first substring** | Sponsors reuse names weekly ("Hostinger"). A naive first-substring match binds this week's read to last week's ad and silently serves the wrong audio (hit on ep691: matched 688's 63.5s read instead of "Hostinger 11/1 Ad" at 72.48s). Ranking: has-audio → title-starts-with-sponsor-name → newest `created_at`. Regression test: `tests/test_matcher.py`. |
 | **Ad Ops data is out of reach** | The Series token reads `/advertisements`, `/brands`, `/campaigns` but gets 403 on `/insertion_orders` and everything under it. So we can confirm an ad's *campaign* binding but NOT whether a **line item** exists. Per Jeff's rule an embedded ad without a line item plays ART19-only and doesn't carry to Spotify/Apple — that last check needs a human glance in the Ad Ops UI. |
+| **Verify the bound read by DURATION, not just by name** | The API does not expose an advertisement's audio duration (no attribute; `media_assets?attachment_type=Advertisement` returns 0 rows; includes return nothing). The ART19 ad page shows it, so the check is manual: compare the ad's displayed duration against the CSV region width. Ep691: ad `00:01:12.48` = 72.48s, region `1055.00–1127.48` = 72.48s → exact match, correct read confirmed. A mismatch means the matcher picked the wrong creative. |
 | **EmbeddedAdPoint needs null position_type AND a bound advertisement** | `position_type: null` is required (integer → 422 `code=present` "Position type must be blank"), plus `end_position`. Its content rule must bind a real live read — `content_type: "Advertisement"` + `content_id` + `content_type_target: "advertisements"`. A `Campaign` rule with no binding makes the whole version `processing_failed`. |
 | **prepare_episode_version fails on new episodes** | Requires an active version to copy from; brand-new episodes get `422 no_active_version`. Use the explicit path for new episodes. |
 | **Param discipline** | Tool arg names are exact — `create_marker_point` uses `maximum_content_count` (NOT `max_content_count`), `update_episode_version` uses `version_id` (NOT `episode_version_id`). Unknown args are silently dropped. |

@@ -90,3 +90,29 @@ if FAILS:
         print("  -", f)
     sys.exit(1)
 print("all matcher tests passed")
+
+
+# ── 7. episode-number guard inside build_plan ──────────────────────────────
+# A title like "688: Eyes on Deck ..." names a different episode; binding it
+# serves last week's creative. build_plan must raise a question, not proceed.
+print()
+rows = [{"name": "Hostinger", "start": 1055.0, "end": 1127.48,
+         "width": 72.48, "tc": "00:17:35"}]
+roster = [ad("688aaa", "688: Eyes on Deck Hostinger Live Read", True,
+             "2026-10-11T00:00:00Z")]
+_plan, questions = pl.build_plan(rows, roster)
+check("different-episode ad raises a question",
+      any("names episode 688" in q for q in questions), True)
+
+# and this week's ad (no episode prefix) must NOT raise that question
+rows = [{"name": "Hostinger", "start": 1055.0, "end": 1127.48,
+         "width": 72.48, "tc": "00:17:35"}]
+roster = [ad("691bbb", "Hostinger 11/1 Ad", True, "2026-11-01T00:00:00Z")]
+_plan, questions = pl.build_plan(rows, roster)
+check("current-week ad raises no question", questions, [])
+
+print()
+if FAILS:
+    print(f"FAILED: {len(FAILS)}")
+    sys.exit(1)
+print("all matcher tests passed")
