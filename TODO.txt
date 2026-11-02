@@ -1,6 +1,28 @@
 TODO
 
-## LiveReadAd upload (per read, not per episode)
+## Ad creative upload — CLOSED (not possible via API)
+
+Investigated 2026-11-01. **The ART19 API cannot upload ad creative audio.**
+This is a platform limitation, not a gap in our tooling. Do not re-investigate.
+
+Evidence (see `docs/ad-upload-recon.md` for the full write-up):
+
+- ART19's own OpenAPI specs (`/swagger_json/{external,internal,ad_ops}/content.json`)
+  list every write operation. **`/advertisements` appears in none of them.**
+- `/media_assets` is GET-only in all three specs.
+- `advertisement_versions` (the audio holder) is in no spec, and every write
+  verb returns 405.
+- No nested upload route under `/advertisements/{id}/…` (12 probed, all 405).
+- `/advertisements` is an undocumented legacy controller — it answers, and
+  `POST` returns 422 rather than 405, but it has no contract and can change
+  without notice. An ad created there lands `media_present: false` (the
+  unbindable JAXOB shape).
+- ART19's own docs list what the API does: episodes, ad *markers*, artwork,
+  feeds/credits/seasons. Ad *creatives* are out of scope.
+
+**Decision:** ad creative upload stays outside the MCP. Handled separately.
+
+## LiveReadAd binding (per read, not per episode)
 
 - EmbeddedAdPoint markers need a bound `LiveReadAd` advertisement, and a
   live read has two halves: the marker (per episode) + the advertisement
