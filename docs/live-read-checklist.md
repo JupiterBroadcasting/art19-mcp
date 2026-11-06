@@ -60,18 +60,29 @@ advertisement
 - **Ad Ops** field should read `True Native Media` (matches the campaign's
   `ad_rep_account`).
 
-## 3. Pre-publish verification (API)
+## 3. Pre-publish verification (API) — one command
 
 ```bash
-# the ad exists, is a live read, and HAS audio
-GET /advertisements?type=LiveReadAd
-#   -> must include your episode-specific title
-#   -> media_present MUST be true   (false = unbindable, e.g. JAXOB)
-
-# the trafficking chain is real
-GET /advertisements/<id>            # relationships.campaign must NOT be nil
-GET /campaigns/<campaign-id>        # status active, brand + insertion_order set
+bb scripts/preflight-live-read.bb Hostinger 72.48
+#                                    ^sponsor  ^CSV region width (seconds)
 ```
+
+Exit 0 = API checks pass, safe to publish. Exit 1 = stop.
+
+It checks, in order: a LiveReadAd exists whose title matches the sponsor →
+it has audio (`media_present`) → it has a campaign → campaign is active and
+paid → campaign has a brand, an insertion order, and an ad_rep_account.
+
+Verified against all three states:
+
+| Case | Result |
+|---|---|
+| ep691 `Hostinger 11/1 Ad` | PASS (all 7 API checks) |
+| ep688 ad (campaign nil) | **FAIL** — "ART19-only playback, will NOT reach Spotify/Apple" |
+| sponsor with no ad record | **FAIL** — tells you to upload it |
+
+It also prints the two things it *cannot* verify: the line item (403 for the
+Series token) and the ad's audio duration (not exposed by the API).
 
 **Duration cross-check** — the API does not expose ad-audio duration, so
 compare by hand:
