@@ -67,6 +67,13 @@ art19-mcp/
 - **Ad slot defaults:** pre-roll **180s × 1** · mid single 120s / 2+ mids
   90s each (3 ads) · post-roll 180s × 2. All Campaign, priority 1.
 
+**Before any episode with a baked sponsor read, read
+`docs/live-read-checklist.md`.** Ad Ops are exacting: a read that isn't
+properly trafficked plays ART19-only and never reaches Spotify/Apple, with no
+error. The checklist covers the ad record, the campaign → brand → insertion
+order → line item chain, the duration cross-check, the marker binding, and
+post-publish verification.
+
 Full reference: `docs/publishing-workflow.md`.
 
 ## Running
