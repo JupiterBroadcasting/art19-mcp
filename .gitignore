@@ -11,3 +11,8 @@ SESSION-*.md
 # Python bytecode (scripts/publish-lup.py is imported by tests)
 __pycache__/
 *.pyc
+
+# Local-only operator docs (contain tailnet host details). Keep on disk,
+# never in the public repo.
+docs/bot-guide.md
+docs/client-connection.md

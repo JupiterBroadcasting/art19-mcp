@@ -1,6 +1,6 @@
 # ART19 ad-upload API reconnaissance (read-only)
 
-Date: 2026-11-01 · Host: showfactory (`wes@<tailnet-host>`) · Credentials: Series-scoped
+Date: 2026-11-01 · Host: showfactory · Credentials: Series-scoped
 token from `/var/lib/hermes/credentials/art19.env` (never printed) · Base: `https://art19.com`
 
 No create/update/delete was executed. Every mutating verb below was sent with a
