@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Block private/internal network addresses from being committed.
+#
+# This repo is public. Twice now an internal address has reached it:
+#   - a public origin IP (scrubbed 2026-10-12)
+#   - the showfactory tailnet IP (scrubbed 2026-11-08)
+#
+# Loopback and 0.0.0.0 are fine (meaningless to an attacker). Private ranges
+# reveal internal topology and are blocked outright.
+#
+# Site-specific hosts are NOT in this file — they live in
+# .githooks/blocked-hosts.local, which is gitignored. Add one line per host.
+#
+# Bypass deliberately if ever needed:  git commit --no-verify
+
+set -u
+
+PATTERNS=(
+  # RFC1918
+  '\b10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b'
+  '\b192\.168\.[0-9]{1,3}\.[0-9]{1,3}\b'
+  '\b172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}\b'
+  # CGNAT / tailscale
+  '\b100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}\b'
+)
+
+# Site-specific hosts: one address per line, comments allowed.
+LOCAL_LIST="$(git rev-parse --show-toplevel 2>/dev/null)/.githooks/blocked-hosts.local"
+if [ -f "$LOCAL_LIST" ]; then
+  while IFS= read -r host; do
+    case "$host" in ''|'#'*) continue ;; esac
+    # escape dots so the address is matched literally
+    PATTERNS+=("$(printf '%s' "$host" | sed 's/\./\\./g')")
+  done < "$LOCAL_LIST"
+fi
+
+FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+[ -z "$FILES" ] && exit 0
+
+FAILED=0
+for f in $FILES; do
+  [ -f "$f" ] || continue
+  case "$f" in
+    *.png|*.jpg|*.jpeg|*.gif|*.woff*|*.ttf|*.zip|*.gz|*.mp3|*.flac|*.wav) continue ;;
+  esac
+
+  for pat in "${PATTERNS[@]}"; do
+    # An explicit "# ip-ok" on the line is an allowlist marker.
+    HITS=$(grep -nEI "$pat" "$f" 2>/dev/null | grep -v 'ip-ok' || true)
+    if [ -n "$HITS" ]; then
+      if [ $FAILED -eq 0 ]; then
+        echo ""
+        echo "COMMIT BLOCKED — internal address in a public repo"
+        echo "-------------------------------------------------"
+      fi
+      FAILED=1
+      echo "  $f"
+      echo "$HITS" | sed 's/^/    /'
+    fi
+  done
+done
+
+if [ $FAILED -ne 0 ]; then
+  echo ""
+  echo "Fix: replace with a placeholder (<tailnet-host>, <origin>), or gitignore"
+  echo "     the file if it is local-only operator notes."
+  echo "     Loopback (127.0.0.1) and 0.0.0.0 are allowed."
+  echo ""
+  exit 1
+fi
+
+exit 0

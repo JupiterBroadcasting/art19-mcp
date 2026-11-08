@@ -16,3 +16,6 @@ __pycache__/
 # never in the public repo.
 docs/bot-guide.md
 docs/client-connection.md
+
+# Local host blocklist for the pre-commit hook (contains real addresses)
+.githooks/blocked-hosts.local
